@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noor Cosméticos | Gestão</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Main Login Screen -->
+    <div id="main-login-screen">
+        <div class="login-container">
+            <div class="brand">
+                <h1>Noor</h1>
+                <span>Cosméticos</span>
+            </div>
+            <p>Acesso Restrito ao Sistema</p>
+            <form id="main-login-form">
+                <div class="form-group" style="text-align: left;">
+                    <label>Senha de Acesso</label>
+                    <input type="password" id="app-password" required placeholder="Digite a senha">
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Entrar</button>
+            </form>
+            <p id="main-login-error" class="error-msg hidden">Senha incorreta. Tente novamente.</p>
+        </div>
+    </div>
+
+    <div class="app-container hidden" id="app-main-content">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>Noor</h1>
+                <span>Cosméticos</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="#dashboard" class="nav-item active" id="nav-dashboard">
+                    <i data-feather="grid"></i>
+                    <span>Painel</span>
+                </a>
+                <a href="#inventory" class="nav-item" id="nav-inventory">
+                    <i data-feather="package"></i>
+                    <span>Estoque</span>
+                </a>
+                <a href="#pos" class="nav-item" id="nav-pos">
+                    <i data-feather="shopping-bag"></i>
+                    <span>Ponto de Venda</span>
+                </a>
+                <a href="#reports" class="nav-item" id="nav-reports">
+                    <i data-feather="file-text"></i>
+                    <span>Relatórios</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <h2 id="page-title">Painel</h2>
+                <div class="user-profile" id="admin-toggle" onclick="app.toggleAdminState()" style="cursor: pointer;" title="Alternar Modo Admin">
+                    <div class="avatar" id="admin-avatar" style="background-color: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-secondary); transition: all 0.3s ease;">
+                        <i data-feather="lock" id="admin-icon"></i>
+                    </div>
+                </div>
+            </header>
+
+            <div class="view-container" id="view-dashboard">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i data-feather="box"></i></div>
+                        <div class="stat-info">
+                            <h3>Valor Total em Estoque</h3>
+                            <p id="total-stock-value">R$ 0,00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i data-feather="dollar-sign"></i></div>
+                        <div class="stat-info">
+                            <h3>Receita Total</h3>
+                            <p id="total-revenue">R$ 0,00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i data-feather="shopping-cart"></i></div>
+                        <div class="stat-info">
+                            <h3>Itens Vendidos</h3>
+                            <p id="total-items-sold">0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="recent-sales-section">
+                    <h3>Vendas Recentes</h3>
+                    <div class="table-container mt-20">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Item</th>
+                                    <th>Quantidade</th>
+                                    <th>Preço Total</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-sales-body">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="view-container hidden" id="view-inventory">
+                <div class="action-bar">
+                    <div class="search-box">
+                        <i data-feather="search"></i>
+                        <input type="text" id="search-inventory" placeholder="Buscar perfumes...">
+                    </div>
+                    <button class="btn btn-primary" onclick="app.openAddProductModal()">
+                        <i data-feather="plus"></i> Adicionar Perfume
+                    </button>
+                </div>
+                <div class="table-container mt-20">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Marca</th>
+                                <th>Estoque (Qtd)</th>
+                                <th>Custo (R$)</th>
+                                <th>Venda (R$)</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="view-container hidden" id="view-pos">
+                <div class="pos-layout">
+                    <div class="pos-products">
+                        <div class="search-box mb-20">
+                            <i data-feather="search"></i>
+                            <input type="text" id="search-pos" placeholder="Buscar produto para vender...">
+                        </div>
+                        <div class="products-grid" id="pos-products-grid">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    <div class="pos-cart">
+                        <h3>Venda Atual</h3>
+                        <div class="cart-items" id="cart-items">
+                            <div class="empty-cart">Selecione um produto para iniciar a venda</div>
+                        </div>
+                        <div class="client-details" style="padding: 20px; border-top: 1px solid var(--border-color); background-color: rgba(255, 255, 255, 0.02);">
+                            <div class="form-group" style="margin-bottom: 12px;">
+                                <label style="font-size: 11px;">Nome do Cliente</label>
+                                <input type="text" id="client-name" placeholder="Ex: Maria Silva" style="padding: 8px 12px; font-size: 13px;">
+                            </div>
+                            <div class="form-row" style="gap: 12px; display: flex;">
+                                <div class="form-group" style="margin-bottom: 0; flex: 2;">
+                                    <label style="font-size: 11px;">WhatsApp (com DDD)</label>
+                                    <input type="text" id="client-phone" placeholder="Ex: 11999999999" style="padding: 8px 12px; font-size: 13px;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0; flex: 1;">
+                                    <label style="font-size: 11px;">Desconto (R$)</label>
+                                    <input type="number" id="sale-discount" placeholder="0.00" min="0" step="0.01" style="padding: 8px 12px; font-size: 13px;">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="cart-summary" style="border-top: none; padding-top: 0;">
+                            <div class="summary-row">
+                                <span>Subtotal</span>
+                                <span id="cart-subtotal">R$ 0,00</span>
+                            </div>
+                            <div class="summary-row total">
+                                <span>Total</span>
+                                <span id="cart-total">R$ 0,00</span>
+                            </div>
+                            <button class="btn btn-primary w-full mt-20" id="btn-checkout" disabled>Finalizar Venda</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="view-container hidden" id="view-reports">
+                <div class="action-bar" style="margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 12px; background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 16px;">
+                        <i data-feather="calendar" style="color: var(--text-secondary); width: 18px; height: 18px;"></i>
+                        <input type="date" id="report-date-start" style="background: transparent; border: none; color: var(--text-primary); font-family: var(--font-body); outline: none;">
+                        <span style="color: var(--text-secondary); font-size: 12px;">até</span>
+                        <input type="date" id="report-date-end" style="background: transparent; border: none; color: var(--text-primary); font-family: var(--font-body); outline: none;">
+                    </div>
+                    <div style="display: flex; gap: 24px;">
+                        <div>
+                            <span style="color: var(--text-secondary); font-size: 12px;">Vendas do Período</span>
+                            <div id="report-sales-count" style="font-size: 20px; font-weight: 600; color: var(--text-primary);">0</div>
+                        </div>
+                        <div>
+                            <span style="color: var(--text-secondary); font-size: 12px;">Faturamento</span>
+                            <div id="report-revenue" style="font-size: 20px; font-weight: 600; color: var(--accent-gold);">R$ 0,00</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-container mt-20">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Hora</th>
+                                <th>Cliente</th>
+                                <th>Contato</th>
+                                <th>Itens (Desconto)</th>
+                                <th>Total Pago</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reports-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Custom Toast -->
+    <div id="toast-notification" class="hidden" style="position: fixed; bottom: 20px; right: 20px; background-color: var(--bg-surface); color: var(--text-primary); padding: 16px 24px; border-radius: var(--radius-md); box-shadow: 0 10px 25px rgba(0,0,0,0.5); border-left: 4px solid var(--accent-gold); z-index: 10000; transition: opacity 0.3s; pointer-events: none; opacity: 0;">
+        <span id="toast-msg" style="font-weight: 500;">Mensagem</span>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay hidden" id="confirm-modal" style="z-index: 9999;">
+        <div class="modal" style="max-width: 400px; text-align: center;">
+            <div class="modal-body" style="padding-top: 32px;">
+                <i data-feather="alert-triangle" style="color: var(--danger); width: 48px; height: 48px; margin-bottom: 16px;"></i>
+                <h3 style="margin-bottom: 8px;">Excluir Produto?</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 24px;">Esta ação removerá permanentemente o perfume do estoque.</p>
+                <div class="modal-actions" style="justify-content: center; gap: 16px;">
+                    <button class="btn btn-outline" onclick="app.closeConfirm()">Cancelar</button>
+                    <button class="btn" style="background-color: var(--danger); color: white; border: none;" id="confirm-yes-btn">Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-overlay hidden" id="login-modal">
+        <div class="modal" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3 id="login-modal-title">Acesso Restrito</h3>
+                <button class="icon-btn" onclick="app.closeLoginModal()"><i data-feather="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">Digite a senha de administrador para acessar o estoque.</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label>Senha</label>
+                        <input type="password" id="admin-password" required placeholder="Sua senha">
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-outline" onclick="app.closeLoginModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Entrar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="product-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Adicionar Perfume</h3>
+                <button class="icon-btn" onclick="app.closeModal()"><i data-feather="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="product-form">
+                    <input type="hidden" id="product-id">
+                    <div class="form-group">
+                        <label>Nome</label>
+                        <input type="text" id="product-name" required placeholder="ex. Oud Wood">
+                    </div>
+                    <div class="form-group">
+                        <label>Marca</label>
+                        <input type="text" id="product-brand" required placeholder="ex. Tom Ford">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Custo (R$)</label>
+                            <input type="number" id="product-cost" required min="0" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label>Venda (R$)</label>
+                            <input type="number" id="product-price" required min="0" step="0.01">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Código de Barras</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="product-barcode" placeholder="Escaneie ou digite" style="flex: 1;">
+                            <button type="button" class="btn btn-outline" style="padding: 0 16px;" onclick="app.manualBarcodeFetch()" title="Buscar Online">
+                                <i data-feather="search"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Estoque Inicial</label>
+                        <input type="number" id="product-stock" required min="0" step="1">
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-outline" onclick="app.closeModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Salvar Perfume</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+
+    <script src="app.js"></script>
+    <script>
+        feather.replace();
+    </script>
+</body>
+</html>

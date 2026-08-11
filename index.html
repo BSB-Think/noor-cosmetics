@@ -166,10 +166,7 @@
                     </div>
                     <div class="pos-cart">
                         <h3>Venda Atual</h3>
-                        <div class="cart-items" id="cart-items">
-                            <div class="empty-cart">Selecione um produto para iniciar a venda</div>
-                        </div>
-                        <div class="client-details" style="padding: 20px; border-top: 1px solid var(--border-color); background-color: rgba(255, 255, 255, 0.02);">
+                        <div class="client-details" style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); background-color: rgba(255, 255, 255, 0.02);">
                             <div class="form-group" style="margin-bottom: 12px;">
                                 <label style="font-size: 11px;">Nome do Cliente</label>
                                 <input type="text" id="client-name" placeholder="Ex: Maria Silva" style="padding: 8px 12px; font-size: 13px;">
@@ -205,7 +202,10 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="cart-summary" style="border-top: none; padding-top: 0;">
+                        <div class="cart-items" id="cart-items">
+                            <div class="empty-cart">Selecione um produto para iniciar a venda</div>
+                        </div>
+                        <div class="cart-summary" style="border-top: 1px solid var(--border-color);">
                             <div class="summary-row">
                                 <span>Subtotal</span>
                                 <span id="cart-subtotal">R$ 0,00</span>
@@ -255,7 +255,7 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Hora</th>
+                                <th>Data / Hora</th>
                                 <th>Cliente/Contato</th>
                                 <th>Pagamento / Vendedor</th>
                                 <th>Itens (Desc.)</th>

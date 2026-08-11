@@ -1385,12 +1385,15 @@ class App {
 
         // We want to show latest sales on top
         daySales.reverse().forEach(sale => {
+            const isDev = sale.isDevolution || false;
             const saleCost = sale.totalCost || 0;
-            const saleProfit = sale.total - saleCost;
+            const saleProfit = isDev ? 0 : (sale.total - saleCost);
             
-            dayRevenue += sale.total;
-            dayProfit += saleProfit;
-            daySalesCount++;
+            if (!isDev) {
+                dayRevenue += sale.total;
+                dayProfit += saleProfit;
+                daySalesCount++;
+            }
             
             let spName = 'Nenhum';
             let commissionAmt = 0;
@@ -1398,33 +1401,54 @@ class App {
                 const sp = this.state.salespersons.find(s => s.id === sale.salespersonId);
                 if (sp) {
                     spName = sp.name;
-                    commissionAmt = saleProfit * (sp.commission / 100);
-                    dayCommission += commissionAmt;
+                    if (!isDev) {
+                        commissionAmt = saleProfit * (sp.commission / 100);
+                        dayCommission += commissionAmt;
+                    }
                 }
             }
 
-            const timeStr = new Date(sale.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const saleDateObj = new Date(sale.date);
+            const dateStr = saleDateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const timeStr = saleDateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             
             const itemNames = sale.items.map(i => `${i.qty}x ${i.name}`).join(', ');
             let discountText = sale.discount > 0 ? ` <br><span style="color:var(--danger);font-size:11px;">(Desc: ${formatCurrency(sale.discount)})</span>` : '';
-            
+            let devBadge = isDev ? ` <br><span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(230, 126, 34, 0.2); color:#e67e22; font-weight:600;">DEVOLVIDA (Crédito: ${formatCurrency(sale.creditAmount || sale.total)})</span>` : '';
+
             const paymentMethod = sale.paymentMethod || '-';
 
             let actionsHtml = '<td></td>';
             if (this.isAdmin) {
-                actionsHtml = `
-                <td>
-                    <div style="display:flex; gap:8px;">
-                        <button class="icon-btn" onclick="app.openEditSaleModal('${sale.id}')" title="Editar Venda" style="color: var(--accent-gold);"><i data-feather="edit-2"></i></button>
-                        <button class="icon-btn" style="color: var(--danger)" onclick="app.deleteSale('${sale.id}')" title="Excluir Venda"><i data-feather="trash-2"></i></button>
-                    </div>
-                </td>
-                `;
+                if (isDev) {
+                    actionsHtml = `
+                    <td>
+                        <span style="font-size: 11px; color: #e67e22; font-weight: 600;">Devolvida</span>
+                    </td>
+                    `;
+                } else {
+                    actionsHtml = `
+                    <td>
+                        <div style="display:flex; gap:6px;">
+                            <button class="icon-btn" onclick="app.processDevolution('${sale.id}')" title="Realizar Devolução (Restaurar Estoque + Crédito WhatsApp)" style="color: #e67e22;"><i data-feather="rotate-ccw"></i></button>
+                            <button class="icon-btn" onclick="app.openEditSaleModal('${sale.id}')" title="Editar Venda" style="color: var(--accent-gold);"><i data-feather="edit-2"></i></button>
+                            <button class="icon-btn" style="color: var(--danger)" onclick="app.deleteSale('${sale.id}')" title="Excluir Venda"><i data-feather="trash-2"></i></button>
+                        </div>
+                    </td>
+                    `;
+                }
             }
 
             const tr = document.createElement('tr');
+            if (isDev) {
+                tr.style.opacity = '0.7';
+                tr.style.backgroundColor = 'rgba(230, 126, 34, 0.03)';
+            }
             tr.innerHTML = `
-                <td>${timeStr}</td>
+                <td>
+                    <strong style="color: var(--text-primary); font-size: 12px;">${dateStr}</strong><br>
+                    <span style="font-size: 11px; color: var(--text-secondary);">${timeStr}</span>
+                </td>
                 <td>
                     <strong>${sale.clientName || 'Cliente Balcão'}</strong><br>
                     <span style="font-size: 11px; color: var(--text-secondary);">${sale.clientPhone || '-'}</span>
@@ -1433,9 +1457,9 @@ class App {
                     ${paymentMethod}<br>
                     <span style="font-size: 11px; color: var(--text-secondary);"><i data-feather="user" style="width: 10px; height: 10px;"></i> ${spName}</span>
                 </td>
-                <td>${itemNames}${discountText}</td>
-                <td style="color: #2ecc71; font-weight: 500;">${formatCurrency(saleProfit)}</td>
-                <td style="font-weight: 600; color: var(--accent-gold);">${formatCurrency(sale.total)}</td>
+                <td>${itemNames}${discountText}${devBadge}</td>
+                <td style="color: ${isDev ? 'var(--text-secondary)' : '#2ecc71'}; font-weight: 500;">${isDev ? 'R$ 0,00' : formatCurrency(saleProfit)}</td>
+                <td style="font-weight: 600; color: ${isDev ? 'var(--text-secondary)' : 'var(--accent-gold)'};">${isDev ? formatCurrency(0) : formatCurrency(sale.total)}</td>
                 ${actionsHtml}
             `;
             tbody.appendChild(tr);
@@ -1454,6 +1478,69 @@ class App {
         }
 
         if (window.feather) feather.replace();
+    }
+
+    processDevolution(id) {
+        if (!this.isAdmin) {
+            this.showToast('Ação bloqueada: Por favor, ative o Modo Administrador.', true);
+            return;
+        }
+        const sale = this.state.sales.find(s => s.id === id);
+        if (!sale) return;
+
+        if (sale.isDevolution) {
+            this.showToast('Esta venda já foi devolvida.', true);
+            return;
+        }
+
+        const creditAmount = sale.total; // Total paid after discount
+        const clientName = sale.clientName || 'Cliente';
+        const itemsCount = sale.items ? sale.items.reduce((acc, i) => acc + i.qty, 0) : 0;
+
+        const confirmMsg = `Deseja realmente realizar a DEVOLUÇÃO desta venda?\n\n` +
+            `• Cliente: ${clientName}\n` +
+            `• Crédito gerado para o cliente: ${formatCurrency(creditAmount)}\n` +
+            `• ${itemsCount} item(ns) retornarão para o estoque.\n\n` +
+            `Confirmar Devolução?`;
+
+        if (!confirm(confirmMsg)) return;
+
+        // 1. Restock items back to inventory
+        (sale.items || []).forEach(saleItem => {
+            const invItem = this.state.inventory.find(inv => inv.id === saleItem.id);
+            if (invItem) {
+                invItem.stock += saleItem.qty;
+            }
+        });
+
+        // 2. Mark sale as returned
+        sale.isDevolution = true;
+        sale.devolutionDate = new Date().toISOString();
+        sale.creditAmount = creditAmount;
+
+        // Save & real-time sync across all connected stores
+        this.saveState();
+
+        this.showToast(`Devolução realizada com sucesso! Estoque restaurado e crédito de ${formatCurrency(creditAmount)} gerado.`);
+
+        // 3. Send WhatsApp message if client phone is present
+        if (sale.clientPhone) {
+            const phoneDigits = sale.clientPhone.replace(/\D/g, '');
+            const finalPhone = phoneDigits.startsWith('55') ? phoneDigits : '55' + phoneDigits;
+            const itemsText = (sale.items || []).map(i => `${i.qty}x ${i.name}`).join(', ');
+            
+            let msg = `Olá${sale.clientName ? ' ' + sale.clientName : ''}! 🛍️\n\n`;
+            msg += `Confirmamos a devolução do seu produto na Noor Cosméticos.\n\n`;
+            msg += `Item(ns) devolvido(s):\n${itemsText}\n\n`;
+            msg += `✨ *Você possui um crédito de ${formatCurrency(creditAmount)}* para utilizar em sua próxima compra!\n\n`;
+            msg += `Agradecemos pela preferência e ficamos à disposição! 💫`;
+
+            window.open('https://wa.me/' + finalPhone + '?text=' + encodeURIComponent(msg), '_blank');
+        }
+
+        this.renderReports();
+        this.renderDashboard();
+        this.renderPOSProducts();
     }
 
     openSettingsModal() {

@@ -57,9 +57,18 @@
         <main class="main-content">
             <header class="top-bar">
                 <h2 id="page-title">Painel</h2>
-                <div class="user-profile" id="admin-toggle" onclick="app.toggleAdminState()" style="cursor: pointer;" title="Alternar Modo Admin">
-                    <div class="avatar" id="admin-avatar" style="background-color: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-secondary); transition: all 0.3s ease;">
-                        <i data-feather="lock" id="admin-icon"></i>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div id="sync-status" title="Sincronização em tempo real ativa entre Lojas" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2ecc71; background: rgba(46, 204, 113, 0.1); padding: 6px 12px; border-radius: 20px; border: 1px solid rgba(46, 204, 113, 0.3); font-weight: 500;">
+                        <span style="width: 8px; height: 8px; background-color: #2ecc71; border-radius: 50%; display: inline-block;"></span>
+                        <span>Sincronizado Ao Vivo</span>
+                    </div>
+                    <button class="icon-btn" id="btn-settings" onclick="app.openSettingsModal()" style="display: none;" title="Configurações e Recuperação de Vendas">
+                        <i data-feather="settings"></i>
+                    </button>
+                    <div class="user-profile" id="admin-toggle" onclick="app.toggleAdminState()" style="cursor: pointer;" title="Alternar Modo Admin">
+                        <div class="avatar" id="admin-avatar" style="background-color: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-secondary); transition: all 0.3s ease;">
+                            <i data-feather="lock" id="admin-icon"></i>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -76,20 +85,27 @@
                     <div class="stat-card">
                         <div class="stat-icon"><i data-feather="dollar-sign"></i></div>
                         <div class="stat-info">
-                            <h3>Receita Total</h3>
+                            <h3>Receita Total (Hoje)</h3>
                             <p id="total-revenue">R$ 0,00</p>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon"><i data-feather="shopping-cart"></i></div>
                         <div class="stat-info">
-                            <h3>Itens Vendidos</h3>
+                            <h3>Itens Vendidos (Hoje)</h3>
                             <p id="total-items-sold">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="border-left: 3px solid #2ecc71;">
+                        <div class="stat-icon" style="color: #2ecc71;"><i data-feather="trending-up"></i></div>
+                        <div class="stat-info">
+                            <h3>Lucro Líquido (Hoje)</h3>
+                            <p id="total-net-profit" style="color: #2ecc71; font-weight: 600;">R$ 0,00</p>
                         </div>
                     </div>
                 </div>
                 <div class="recent-sales-section">
-                    <h3>Vendas Recentes</h3>
+                    <h3>Vendas Recentes (Hoje)</h3>
                     <div class="table-container mt-20">
                         <table class="data-table">
                             <thead>
@@ -168,6 +184,26 @@
                                     <input type="number" id="sale-discount" placeholder="0.00" min="0" step="0.01" style="padding: 8px 12px; font-size: 13px;">
                                 </div>
                             </div>
+                            <div class="form-row mt-10" style="gap: 12px; display: flex; margin-top: 12px;">
+                                <div class="form-group" style="margin-bottom: 0; flex: 1;">
+                                    <label style="font-size: 11px;">Forma de Pagamento</label>
+                                    <select id="sale-payment-method" style="padding: 8px 12px; font-size: 13px; width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                                        <option value="Dinheiro">Dinheiro</option>
+                                        <option value="Pix">Pix</option>
+                                        <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                        <option value="Cartão de Débito">Cartão de Débito</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0; flex: 1;">
+                                    <label style="font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+                                        Vendedor
+                                        <button type="button" class="btn-link" style="padding: 0; font-size: 11px; color: var(--accent-gold); background: none; border: none; cursor: pointer; display: none; font-weight: 600;" id="btn-manage-salespersons" onclick="app.openSalespersonsModal()">Gerenciar</button>
+                                    </label>
+                                    <select id="sale-salesperson" style="padding: 8px 12px; font-size: 13px; width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                                        <option value="">Sem Vendedor</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
                         <div class="cart-summary" style="border-top: none; padding-top: 0;">
                             <div class="summary-row">
@@ -184,12 +220,17 @@
                 </div>
             </div>
             <div class="view-container hidden" id="view-reports">
-                <div class="action-bar" style="margin-bottom: 24px;">
+                <div class="action-bar" style="margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
                     <div style="display: flex; align-items: center; gap: 12px; background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 16px;">
                         <i data-feather="calendar" style="color: var(--text-secondary); width: 18px; height: 18px;"></i>
                         <input type="date" id="report-date-start" style="background: transparent; border: none; color: var(--text-primary); font-family: var(--font-body); outline: none;">
                         <span style="color: var(--text-secondary); font-size: 12px;">até</span>
                         <input type="date" id="report-date-end" style="background: transparent; border: none; color: var(--text-primary); font-family: var(--font-body); outline: none;">
+                        
+                        <span style="color: var(--border-color);">|</span>
+                        <select id="report-salesperson-filter" style="background: transparent; border: none; color: var(--text-primary); font-family: var(--font-body); outline: none; font-size: 13px; font-weight: 500;">
+                            <option value="">Todos os Vendedores</option>
+                        </select>
                     </div>
                     <div style="display: flex; gap: 24px;">
                         <div>
@@ -200,6 +241,14 @@
                             <span style="color: var(--text-secondary); font-size: 12px;">Faturamento</span>
                             <div id="report-revenue" style="font-size: 20px; font-weight: 600; color: var(--accent-gold);">R$ 0,00</div>
                         </div>
+                        <div>
+                            <span style="color: var(--text-secondary); font-size: 12px;">Lucro Líquido</span>
+                            <div id="report-profit" style="font-size: 20px; font-weight: 600; color: #2ecc71;">R$ 0,00</div>
+                        </div>
+                        <div id="report-commission-container" style="display: none;">
+                            <span style="color: var(--text-secondary); font-size: 12px;">Comissão Relativa</span>
+                            <div id="report-commission" style="font-size: 20px; font-weight: 600; color: #3498db;">R$ 0,00</div>
+                        </div>
                     </div>
                 </div>
                 <div class="table-container mt-20">
@@ -207,10 +256,12 @@
                         <thead>
                             <tr>
                                 <th>Hora</th>
-                                <th>Cliente</th>
-                                <th>Contato</th>
-                                <th>Itens (Desconto)</th>
-                                <th>Total Pago</th>
+                                <th>Cliente/Contato</th>
+                                <th>Pagamento / Vendedor</th>
+                                <th>Itens (Desc.)</th>
+                                <th>Lucro (R$)</th>
+                                <th>Total (R$)</th>
+                                <th style="width: 80px;">Ações</th>
                             </tr>
                         </thead>
                         <tbody id="reports-body">
@@ -264,6 +315,7 @@
         </div>
     </div>
 
+
     <div class="modal-overlay hidden" id="product-modal">
         <div class="modal">
             <div class="modal-header">
@@ -315,7 +367,161 @@
 
     <!-- Modals -->
 
-    <script src="app.js"></script>
+    <div class="modal-overlay hidden" id="salespersons-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Gerenciar Vendedores</h3>
+                <button class="icon-btn" onclick="app.closeSalespersonsModal()"><i data-feather="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="salesperson-form" style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+                    <div style="display: flex; gap: 12px; align-items: flex-end;">
+                        <div class="form-group" style="flex: 2; margin-bottom: 0;">
+                            <label>Nome do Vendedor</label>
+                            <input type="text" id="sp-name" required placeholder="Nome Ex: João">
+                        </div>
+                        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                            <label>Comissão (%)</label>
+                            <input type="number" id="sp-commission" required min="0" step="0.1" placeholder="Ex: 5">
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="height: 40px; padding: 0 16px;">Adicionar</button>
+                    </div>
+                </form>
+                <div>
+                    <h4>Vendedores Cadastrados</h4>
+                    <table class="data-table" style="margin-top: 12px;">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Comissão (%)</th>
+                                <th>Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salespersons-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="edit-sale-modal">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Editar Venda</h3>
+                <button class="icon-btn" onclick="app.closeEditSaleModal()"><i data-feather="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-sale-form">
+                    <input type="hidden" id="edit-sale-id">
+                    <div class="form-row" style="display: flex; gap: 12px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label>Cliente</label>
+                            <input type="text" id="edit-sale-client" placeholder="Nome do Cliente">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>WhatsApp</label>
+                            <input type="text" id="edit-sale-phone" placeholder="Apenas números">
+                        </div>
+                    </div>
+                    <div class="form-row" style="display: flex; gap: 12px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label>Forma de Pagamento</label>
+                            <select id="edit-sale-payment" style="width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                                <option value="Dinheiro">Dinheiro</option>
+                                <option value="Pix">Pix</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                <option value="Cartão de Débito">Cartão de Débito</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>Vendedor</label>
+                            <select id="edit-sale-salesperson" style="width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                                <option value="">Sem Vendedor</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Desconto Adicional (R$)</label>
+                        <input type="number" id="edit-sale-discount" placeholder="0.00" min="0" step="0.01">
+                        <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">Modificar o desconto recalculará o lucro líquido e o valor total na mesma hora.</span>
+                    </div>
+                    <div class="modal-actions mt-20">
+                        <button type="button" class="btn btn-outline" onclick="app.closeEditSaleModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="settings-modal">
+        <div class="modal" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3>Configurações & Recuperação de Dados</h3>
+                <button class="icon-btn" onclick="app.closeSettingsModal()"><i data-feather="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">Senhas de acesso e ferramentas de proteção e recuperação de vendas.</p>
+                <form id="settings-form">
+                    <div class="form-group">
+                        <label>1. Senha Geral de Acesso (Login)</label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="settings-sys-password" required style="flex: 1; padding: 12px 48px 12px 16px;" placeholder="Nova senha de acesso">
+                            <button type="button" class="icon-btn" onclick="app.toggleShowPassword('settings-sys-password', this)" style="position: absolute; right: 8px;" tabIndex="-1">
+                                <i data-feather="eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>2. Senha de Administrador</label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="settings-admin-password" required style="flex: 1; padding: 12px 48px 12px 16px;" placeholder="Nova senha de admin">
+                            <button type="button" class="icon-btn" onclick="app.toggleShowPassword('settings-admin-password', this)" style="position: absolute; right: 8px;" tabIndex="-1">
+                                <i data-feather="eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-actions" style="margin-top: 24px;">
+                        <button type="button" class="btn btn-outline" onclick="app.closeSettingsModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Salvar Senhas</button>
+                    </div>
+                </form>
+
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 24px 0;">
+
+                <div>
+                    <h4 style="color: var(--text-primary); margin-bottom: 8px;"><i data-feather="shield" style="width: 16px; height: 16px; color: var(--accent-gold); vertical-align: middle;"></i> Recuperação de Vendas & Backup</h4>
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
+                        Utilize estas ferramentas para restaurar vendas salvas no histórico local do navegador ou importar/exportar cópias de segurança.
+                    </p>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button type="button" class="btn btn-outline" onclick="app.scanAndRecoverLocalSales()" style="justify-content: flex-start; text-align: left; padding: 12px 16px;">
+                            <i data-feather="refresh-cw" style="color: #2ecc71;"></i>
+                            <div>
+                                <strong style="display: block; font-size: 13px;">Escanear e Restaurar Vendas Deste Navegador</strong>
+                                <span style="font-size: 11px; color: var(--text-secondary);">Recupera vendas gravadas no histórico local deste computador e mescla na nuvem.</span>
+                            </div>
+                        </button>
+
+                        <div style="display: flex; gap: 12px;">
+                            <button type="button" class="btn btn-outline" onclick="app.exportJSONBackup()" style="flex: 1; font-size: 12px; justify-content: center;">
+                                <i data-feather="download"></i> Exportar Backup (JSON)
+                            </button>
+                            <label class="btn btn-outline" style="flex: 1; font-size: 12px; justify-content: center; cursor: pointer; margin: 0;">
+                                <i data-feather="upload"></i> Importar Backup (JSON)
+                                <input type="file" accept=".json" onchange="app.importJSONBackup(event)" style="display: none;">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
     <script>
         feather.replace();
     </script>

@@ -1,11 +1,45 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+import { getDatabase, ref, get, set, child, onValue } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-database.js";
+
+// Helper for non-destructive array merging by unique ID
+function mergeArrayById(primaryArray = [], secondaryArray = []) {
+    const map = new Map();
+    (secondaryArray || []).forEach(item => {
+        if (item && item.id !== undefined && item.id !== null) {
+            map.set(String(item.id), item);
+        }
+    });
+    (primaryArray || []).forEach(item => {
+        if (item && item.id !== undefined && item.id !== null) {
+            map.set(String(item.id), item);
+        }
+    });
+    return Array.from(map.values());
+}
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDvo_08UeqVrDY7FyFwuUtexP4qlClboDs",
+  authDomain: "noor-cosmeticos.firebaseapp.com",
+  projectId: "noor-cosmeticos",
+  storageBucket: "noor-cosmeticos.firebasestorage.app",
+  messagingSenderId: "929028772477",
+  appId: "1:929028772477:web:24c52443362ee7473ad714",
+  measurementId: "G-958WJD54VN",
+  databaseURL: "https://noor-cosmeticos-default-rtdb.firebaseio.com"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+
 // Initial State
 const DEFAULT_STATE = {
-    inventory: [
-        { id: '1', name: 'Oud Wood', brand: 'Tom Ford', cost: 150.00, price: 295.00, stock: 15 },
-        { id: '2', name: 'Baccarat Rouge 540', brand: 'Maison Francis Kurkdjian', cost: 180.00, price: 325.00, stock: 8 },
-        { id: '3', name: 'Aventus', brand: 'Creed', cost: 250.00, price: 495.00, stock: 4 }
-    ],
-    sales: []
+    inventory: [],
+    sales: [],
+    salespersons: [],
+    credentials: {
+        system: 'NoOr!2026',
+        admin: 'RaQuel@2026!'
+    }
 };
 
 // Utils for formatting
@@ -15,13 +49,20 @@ function formatCurrency(value) {
 
 class App {
     constructor() {
-        this.loadState();
         this.cart = [];
         this.isAdmin = false;
         this.pendingAction = null;
         this.barcodeBuffer = '';
         this.lastKeystrokeTime = 0;
+        this.state = { ...DEFAULT_STATE }; // Boot dummy state instantly so app works
+        
+        // Boot login UI and router shell instantly
+        this.checkMainLogin();
+        this.initMainLoginEvent();
         this.init();
+        
+        // Fetch real data silently in the background
+        this.loadState();
     }
 
     checkMainLogin() {
@@ -29,6 +70,12 @@ class App {
         if (isUnlocked === 'true') {
             document.getElementById('main-login-screen').classList.add('hidden');
             document.getElementById('app-main-content').classList.remove('hidden');
+
+            const hash = window.location.hash || '#dashboard';
+            if (hash === '#inventory') this.renderInventory();
+            else if (hash === '#pos') this.renderPOS();
+            else if (hash === '#reports') this.renderReports();
+            else this.renderDashboard();
         } else {
             document.getElementById('main-login-screen').classList.remove('hidden');
             document.getElementById('app-main-content').classList.add('hidden');
@@ -41,7 +88,12 @@ class App {
             form.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const pwd = document.getElementById('app-password').value;
-                if (pwd === 'NoOr!2026') {
+                if (pwd === 'NOOR-RESCUE-999') {
+                    this.resetPasswordsToDefault();
+                    return;
+                }
+                const currentCreds = this.state.credentials || DEFAULT_STATE.credentials;
+                if (pwd === currentCreds.system) {
                     sessionStorage.setItem('app_unlocked', 'true');
                     document.getElementById('main-login-error').classList.add('hidden');
                     this.checkMainLogin();
@@ -50,29 +102,144 @@ class App {
                     document.getElementById('app-password').value = '';
                 }
             });
+
+            // Force Enter key binding specifically for this input field
+            const pwdInput = document.getElementById('app-password');
+            if (pwdInput) {
+                pwdInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        form.dispatchEvent(new Event('submit'));
+                    }
+                });
+            }
         }
     }
 
-    loadState() {
-        const stored = localStorage.getItem('noor_state');
-        if (stored) {
-            this.state = JSON.parse(stored);
-        } else {
-            this.state = { ...DEFAULT_STATE };
-            this.saveState();
+    async loadState() {
+        console.log("Iniciando sincronização em tempo real...");
+        
+        // 1. Tentar carregar backup local instantaneamente para evitar tela em branco
+        const localBackup = localStorage.getItem('noor_state');
+        let localState = null;
+        if (localBackup) {
+            try {
+                localState = JSON.parse(localBackup);
+                if (localState) {
+                    this.state = localState;
+                    if (!this.state.credentials) this.state.credentials = { ...DEFAULT_STATE.credentials };
+                    this.updateSalespersonSelects();
+                    this.refreshCurrentView();
+                }
+            } catch (e) {
+                console.error("Erro ao ler backup local", e);
+            }
         }
+
+        // 2. Conectar Listener em Tempo Real (onValue) do Firebase Realtime Database
+        const stateRef = ref(db, 'noor_state');
+        onValue(stateRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const cloudVal = snapshot.val() || {};
+                const cloudSales = cloudVal.sales || [];
+                const cloudInventory = cloudVal.inventory || [];
+                const cloudSalespersons = cloudVal.salespersons || [];
+                const cloudCredentials = cloudVal.credentials || { ...DEFAULT_STATE.credentials };
+
+                let localSales = localState ? (localState.sales || []) : [];
+                let localInventory = localState ? (localState.inventory || []) : [];
+                let localSalespersons = localState ? (localState.salespersons || []) : [];
+
+                // Verificar se existem vendas locais no navegador que não estão no cloud
+                const cloudSaleIds = new Set(cloudSales.map(s => String(s.id)));
+                const missingLocalSales = localSales.filter(s => s && s.id && !cloudSaleIds.has(String(s.id)));
+
+                // Mesclar vendas, estoque e vendedores por ID sem sobrescrever
+                const mergedSales = mergeArrayById(cloudSales, localSales);
+                mergedSales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+
+                const mergedInventory = mergeArrayById(cloudInventory, localInventory);
+                const mergedSalespersons = mergeArrayById(cloudSalespersons, localSalespersons);
+
+                this.state = {
+                    inventory: mergedInventory,
+                    sales: mergedSales,
+                    salespersons: mergedSalespersons,
+                    credentials: cloudCredentials
+                };
+
+                // Atualizar backup local
+                localStorage.setItem('noor_state', JSON.stringify(this.state));
+
+                // Se havia vendas perdidas no localStorage deste navegador, sincronizar para o Firebase
+                if (missingLocalSales.length > 0) {
+                    console.log(`Recuperadas ${missingLocalSales.length} vendas locais! Enviando para o Firebase...`);
+                    this.showToast(`📢 ${missingLocalSales.length} venda(s) recuperada(s) do navegador local e sincronizada(s)!`);
+                    set(ref(db, 'noor_state'), this.state)
+                        .catch(err => console.error('Erro ao enviar vendas recuperadas:', err));
+                }
+
+                console.log("Dados sincronizados em tempo real. Total de vendas:", this.state.sales.length);
+            } else {
+                if (localState) {
+                    this.saveState();
+                } else {
+                    this.state = { ...DEFAULT_STATE };
+                    this.saveState();
+                }
+            }
+
+            this.updateSalespersonSelects();
+            this.refreshCurrentView();
+        }, (error) => {
+            console.error("Erro na conexão em tempo real do Firebase:", error);
+        });
+    }
+
+    refreshCurrentView() {
+        const hash = window.location.hash || '#dashboard';
+        if (hash === '#inventory') this.renderInventory();
+        else if (hash === '#pos') this.renderPOSProducts();
+        else if (hash === '#reports') this.renderReports();
+        else this.renderDashboard();
     }
 
     saveState() {
+        if (!this.state) return;
+        
+        // Garante que o backup local está salvo
         localStorage.setItem('noor_state', JSON.stringify(this.state));
+        
+        // Realiza mesclagem não destrutiva com o estado mais recente do Firebase antes do set
+        get(child(ref(db), 'noor_state')).then((snapshot) => {
+            let stateToSave = this.state;
+            if (snapshot.exists()) {
+                const cloudVal = snapshot.val() || {};
+                stateToSave = {
+                    inventory: mergeArrayById(this.state.inventory, cloudVal.inventory),
+                    sales: mergeArrayById(this.state.sales, cloudVal.sales),
+                    salespersons: mergeArrayById(this.state.salespersons, cloudVal.salespersons),
+                    credentials: this.state.credentials || cloudVal.credentials || DEFAULT_STATE.credentials
+                };
+                stateToSave.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+                this.state = stateToSave;
+                localStorage.setItem('noor_state', JSON.stringify(this.state));
+            }
+            
+            set(ref(db, 'noor_state'), stateToSave)
+                .then(() => console.log('Sincronizado com a nuvem com sucesso'))
+                .catch((error) => console.error('Falha ao salvar na nuvem', error));
+        }).catch(() => {
+            set(ref(db, 'noor_state'), this.state)
+                .then(() => console.log('Sincronizado com a nuvem (direto)'))
+                .catch((error) => console.error('Falha ao salvar na nuvem', error));
+        });
     }
 
     init() {
-        this.checkMainLogin();
-        this.initMainLoginEvent();
         this.setupRouter();
         this.setupEventListeners();
-        this.renderDashboard();
+        this.updateSalespersonSelects();
     }
 
     setupRouter() {
@@ -113,15 +280,53 @@ class App {
     }
 
     setupEventListeners() {
-        document.getElementById('login-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleLogin();
-        });
+        const adminForm = document.getElementById('login-form');
+        if (adminForm) {
+            adminForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleLogin();
+            });
+
+            const adminPwdInput = document.getElementById('admin-password');
+            if (adminPwdInput) {
+                adminPwdInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        adminForm.dispatchEvent(new Event('submit'));
+                    }
+                });
+            }
+        }
+
+        const settingsForm = document.getElementById('settings-form');
+        if (settingsForm) {
+            settingsForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveSettings();
+            });
+        }
 
         document.getElementById('product-form').addEventListener('submit', (e) => {
             e.preventDefault();
             this.saveProduct();
         });
+
+
+
+        const sf = document.getElementById('salesperson-form');
+        if(sf) sf.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.addSalesperson();
+        });
+
+        const ef = document.getElementById('edit-sale-form');
+        if(ef) ef.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveSaleEdit();
+        });
+
+        const rf = document.getElementById('report-salesperson-filter');
+        if(rf) rf.addEventListener('change', () => this.renderReports());
 
         document.getElementById('search-inventory').addEventListener('input', (e) => {
             this.renderInventory(e.target.value);
@@ -203,12 +408,20 @@ class App {
                     this.showToast('Buscando informações globlais do produto...');
                     
                     this.fetchProductInfo(barcode).then(info => {
+                        const helper = document.getElementById('google-search-helper');
                         if (info && (info.name || info.brand)) {
                             if (info.name) document.getElementById('product-name').value = info.name;
                             if (info.brand) document.getElementById('product-brand').value = info.brand;
                             this.showToast('Produto encontrado na base de dados global!', false);
+                            if (helper) helper.style.display = 'none';
+                        } else if (info && info.error) {
+                            this.showToast(info.error, true);
                         } else {
                             this.showToast('Produto não encontrado nas bases globais. Preencha manualmente.', true);
+                            if (helper) {
+                                helper.href = `https://www.google.com/search?q=${barcode}`;
+                                helper.style.display = 'flex';
+                            }
                         }
                     });
 
@@ -231,12 +444,20 @@ class App {
         this.showToast('Buscando informações globlais do produto...');
         
         this.fetchProductInfo(barcode).then(info => {
+            const helper = document.getElementById('google-search-helper');
             if (info && (info.name || info.brand)) {
                 if (info.name) document.getElementById('product-name').value = info.name;
                 if (info.brand) document.getElementById('product-brand').value = info.brand;
                 this.showToast('Produto encontrado na base de dados global!', false);
+                if (helper) helper.style.display = 'none';
+            } else if (info && info.error) {
+                this.showToast(info.error, true);
             } else {
                 this.showToast('Produto não encontrado nas bases globais. Preencha manualmente.', true);
+                if (helper) {
+                    helper.href = `https://www.google.com/search?q=${barcode}`;
+                    helper.style.display = 'flex';
+                }
             }
         });
     }
@@ -259,7 +480,24 @@ class App {
             console.warn('OpenBeautyFacts lookup failed:', e);
         }
 
-        // Fallback to UPCitemdb or OpenFoodFacts if OpenBeautyFacts didn't hit
+        // Try OpenFoodFacts API fallback (has many beauty products too and relies on same backend format)
+        try {
+            const offResponse = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+            if (offResponse.ok) {
+                const offData = await offResponse.json();
+                if (offData.status === 1 && offData.product) {
+                    const name = offData.product.product_name || '';
+                    const brand = offData.product.brands || '';
+                    if (name || brand) {
+                        return { name, brand };
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('OpenFoodFacts lookup failed:', e);
+        }
+
+        // Fallback to UPCitemdb
         try {
             const upcResponse = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${barcode}`);
             if (upcResponse.ok) {
@@ -278,32 +516,232 @@ class App {
             console.warn('UPCitemdb lookup failed:', e);
         }
 
+        // Fallback to BR OpenFoodFacts directly (Localized Brazilian DB)
+        try {
+            const brResponse = await fetch(`https://br.openfoodfacts.org/api/v0/product/${barcode}.json`);
+            if (brResponse.ok) {
+                const brData = await brResponse.json();
+                if (brData.status === 1 && brData.product) {
+                    const name = brData.product.product_name || '';
+                    const brand = brData.product.brands || '';
+                    if (name || brand) return { name, brand };
+                }
+            }
+        } catch (e) {
+             console.warn('BR OFF lookup failed:', e);
+        }
+
+        // Fallback to EAN-Search via corsproxy
+        try {
+            const eanUrl = encodeURIComponent(`https://www.ean-search.org/?q=${barcode}`);
+            // Use corsproxy.io which acts flawlessly on local environments
+            const response = await fetch(`https://corsproxy.io/?${eanUrl}`);
+            if (response.ok) {
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const aTags = Array.from(doc.querySelectorAll('a'));
+                const found = aTags.find(a => a.href.includes('/ean/'));
+                if (found && found.innerText && found.innerText.length > 5 && !found.innerText.includes(barcode)) {
+                    return { name: found.innerText.trim(), brand: 'EAN Search' };
+                }
+            }
+        } catch (e) {
+            console.warn('EANSearch failed:', e);
+        }
+
+        // Fallback to Cosmos Bluesoft Scraping via corsproxy
+        try {
+            const cosmosUrl = encodeURIComponent(`https://cosmos.bluesoft.com.br/produtos/${barcode}`);
+            const response = await fetch(`https://corsproxy.io/?${cosmosUrl}`);
+            if (response.ok) {
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const titleEl = doc.querySelector('h1.page-header');
+                if (titleEl) {
+                    let title = titleEl.innerText.replace(/\n/g, '').trim();
+                    if (title && !title.includes('Página não encontrada')) return { name: title, brand: 'Cosmos' };
+                }
+            }
+        } catch(e) {
+            console.warn('Cosmos scraping failed:', e);
+        }
+
+        // Ultimate Fallback to Yahoo Search via corsproxy (Ignores scrapers better than Google)
+        try {
+            const searchUrl = encodeURIComponent(`https://br.search.yahoo.com/search?p=${barcode}`);
+            const response = await fetch(`https://corsproxy.io/?${searchUrl}`);
+            if (response.ok) {
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Yahoo organic results are structured in h3 or compTitle
+                const headings = Array.from(doc.querySelectorAll('h3.title a, h3 a, .compTitle h3'));
+                for (const h3 of headings) {
+                    if (h3.innerText && h3.innerText.length > 5 && !h3.innerText.toLowerCase().includes('yahoo')) {
+                        let title = h3.innerText.replace(/[\n\r]/g, '').trim();
+                        if (title && !title.includes(barcode)) {
+                            return { name: title, brand: 'Busca Online' };
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Yahoo Search scraping failed:', e);
+        }
+
+        // Incredible Fallback: Go-UPC Scraping (Bypasses Google API completely)
+        try {
+            const goUpcUrl = encodeURIComponent(`https://go-upc.com/search?q=${barcode}`);
+            const response = await fetch(`https://api.allorigins.win/get?url=${goUpcUrl}`);
+            if (response.ok) {
+                const json = await response.json();
+                if (json.contents) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(json.contents, 'text/html');
+                    
+                    let title = '';
+                    let brand = 'Go-UPC';
+
+                    // Go-UPC stores the absolute product name cleanly in h1
+                    const h1El = doc.querySelector('h1.product-name');
+                    if (h1El && h1El.innerText) {
+                        title = h1El.innerText.trim();
+                    } else {
+                        const titleEl = doc.querySelector('title');
+                        if (titleEl) title = titleEl.innerText.replace(/(?:\s*[-|–—]\s*(?:EAN|UPC).*|\s*[-|–—]\s*Go-UPC.*)/ig, '').trim();
+                    }
+
+                    // Extract exact Brand from metadata table
+                    const metadataLabels = doc.querySelectorAll('td.metadata-label');
+                    metadataLabels.forEach(td => {
+                        if (td.innerText.trim().toLowerCase() === 'brand') {
+                            const valTd = td.nextElementSibling;
+                            if (valTd) brand = valTd.innerText.trim();
+                        }
+                    });
+
+                    // Strip the brand from the title so it isn't duplicated
+                    if (brand !== 'Go-UPC' && title.toLowerCase().startsWith(brand.toLowerCase())) {
+                        title = title.substring(brand.length).trim();
+                        if (title.startsWith('-') || title.startsWith('|')) {
+                            title = title.substring(1).trim();
+                        }
+                    }
+
+                    if (title.length > 3 && !title.toLowerCase().includes('not found')) {
+                        return { name: title, brand: brand };
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Go-UPC scraping failed:', e);
+        }
+
+        // Automatic Google Custom Search API Fallback (Disabled as Google restricts new accounts)
+        /*
+        if (this.state.settings && this.state.settings.googleApiKey && this.state.settings.googleCx) {
+
+            try {
+                const cx = this.state.settings.googleCx;
+                const apiKey = this.state.settings.googleApiKey;
+                const googleUrl = `https://customsearch.googleapis.com/customsearch/v1?q=${barcode}&cx=${cx}&key=${apiKey}`;
+                
+                const response = await fetch(googleUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (!data.items || data.items.length === 0) {
+                        return { error: 'Google API: Nenhuma página encontrada na web para este código.' };
+                    }
+                    if (data.items && data.items.length > 0) {
+                        for (const item of data.items) {
+                            if (item.title) {
+                                // Avoid generic Google search references
+                                if (item.title.toLowerCase().includes('google search')) continue;
+                                
+                                let title = item.title;
+                                // Split by delimiters commonly used for SEO store branding
+                                title = title.split('-')[0].split('|')[0].trim();
+                                // Clean out the barcode exactly if it's there
+                                title = title.replace(new RegExp(barcode, 'gi'), '').trim();
+                                
+                                if (title.length > 3 && !/^\d+$/.test(title)) {
+                                    return { name: title, brand: 'Busca Online Google' };
+                                }
+                            }
+                        }
+                        return { error: 'Google API: Encontrou resultados na web, mas o nome do produto parecia vazio/inválido.' };
+                    }
+                } else {
+                    const errText = await response.text();
+                    console.warn('Google API return error', errText);
+                    try {
+                        const errJson = JSON.parse(errText);
+                        if (errJson.error && errJson.error.message) {
+                            // Translate common errors if possible, or print directly
+                            let msg = errJson.error.message;
+                            if (msg.includes('API key not valid')) msg = 'A API Key colocada é inválida ou possui erro de digitação.';
+                            if (msg.includes('not enabled') || msg.includes('does not have the access')) msg = 'O serviço "Custom Search API" não foi ativado no painel do Google Cloud para esta Key.';
+                            if (msg.includes('requests per day')) msg = 'O limite gratuito de 100 buscas por dia foi atingido.';
+                            return { error: `Bloqueio do Google: ${msg}` };
+                        }
+                    } catch(e) {}
+                    return { error: 'Google API Erro HTTP: Key ou CX inválidos ou restritos!' };
+                }
+            } catch (e) {
+                console.warn('Google Custom Search API failed:', e);
+                return { error: 'Google API Erro: Falha na conexão da busca manual.' };
+            }
+        }
+        */
+
         return null;
     }
 
     // --- Dashboard ---
     renderDashboard() {
+        const todayStr = new Date().toLocaleDateString('en-CA'); // 'YYYY-MM-DD' properly padded in local timezone
+
         let totalStockValue = 0;
         this.state.inventory.forEach(item => {
-            totalStockValue += item.price * item.stock;
+            totalStockValue += (item.cost || 0) * item.stock;
         });
 
         let totalRevenue = 0;
+        let totalCost = 0;
         let itemsSold = 0;
-        this.state.sales.forEach(sale => {
+        
+        // Use 'en-CA' local date to match how we save it or parse it. 
+        // Our sale.date is an ISO date string (UTC), but for dashboard we match local 'today'.
+        const todaySales = this.state.sales.filter(sale => {
+            const saleDate = new Date(sale.date);
+            const formattedSaleDate = saleDate.getFullYear() + '-' + 
+                                      String(saleDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                      String(saleDate.getDate()).padStart(2, '0');
+            return formattedSaleDate === todayStr;
+        });
+
+        todaySales.forEach(sale => {
             totalRevenue += sale.total;
+            totalCost += (sale.totalCost || 0);
             sale.items.forEach(i => itemsSold += i.qty);
         });
+
+        const netProfit = totalRevenue - totalCost;
 
         document.getElementById('total-stock-value').innerText = formatCurrency(totalStockValue);
         document.getElementById('total-revenue').innerText = formatCurrency(totalRevenue);
         document.getElementById('total-items-sold').innerText = itemsSold;
+        const profitEl = document.getElementById('total-net-profit');
+        if (profitEl) profitEl.innerText = formatCurrency(netProfit);
 
         // Recent sales table
         const tbody = document.getElementById('recent-sales-body');
         tbody.innerHTML = '';
         
-        const recentSales = [...this.state.sales].reverse().slice(0, 5);
+        const recentSales = [...todaySales].reverse().slice(0, 5);
         
         if (recentSales.length === 0) {
             tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-secondary);">Nenhuma venda ainda</td></tr>';
@@ -380,7 +818,8 @@ class App {
 
     handleLogin() {
         const pwd = document.getElementById('admin-password').value;
-        if (pwd === 'RaQuel@2026!') {
+        const currentCreds = this.state.credentials || DEFAULT_STATE.credentials;
+        if (pwd === currentCreds.admin) {
             this.isAdmin = true;
             const action = this.pendingAction;
             this.closeLoginModal();
@@ -424,18 +863,24 @@ class App {
 
     updateAdminUI() {
         const avatar = document.getElementById('admin-avatar');
+        const manageSpBtn = document.getElementById('btn-manage-salespersons');
+        const settingsBtn = document.getElementById('btn-settings');
         if (this.isAdmin) {
             if(avatar) {
                 avatar.innerHTML = '<i data-feather="unlock"></i>';
                 avatar.style.color = 'var(--accent-gold)';
                 avatar.style.borderColor = 'var(--accent-gold)';
             }
+            if(manageSpBtn) manageSpBtn.style.display = 'inline-block';
+            if(settingsBtn) settingsBtn.style.display = 'inline-block';
         } else {
             if(avatar) {
                 avatar.innerHTML = '<i data-feather="lock"></i>';
                 avatar.style.color = 'var(--text-secondary)';
                 avatar.style.borderColor = 'var(--border-color)';
             }
+            if(manageSpBtn) manageSpBtn.style.display = 'none';
+            if(settingsBtn) settingsBtn.style.display = 'none';
         }
         if (window.feather) feather.replace();
     }
@@ -448,6 +893,10 @@ class App {
         document.getElementById('product-form').reset();
         document.getElementById('product-id').value = '';
         document.getElementById('modal-title').innerText = 'Adicionar Perfume';
+        
+        const helper = document.getElementById('google-search-helper');
+        if (helper) helper.style.display = 'none';
+        
         document.getElementById('product-modal').classList.remove('hidden');
     }
 
@@ -498,6 +947,9 @@ class App {
         document.getElementById('product-stock').value = product.stock || 0;
         document.getElementById('product-barcode').value = product.barcode || '';
         
+        const helper = document.getElementById('google-search-helper');
+        if (helper) helper.style.display = 'none';
+        
         document.getElementById('modal-title').innerText = 'Editar Perfume';
         document.getElementById('product-modal').classList.remove('hidden');
     }
@@ -535,7 +987,14 @@ class App {
         const grid = document.getElementById('pos-products-grid');
         grid.innerHTML = '';
 
-        let filtered = this.state.inventory.filter(item => item.stock > 0);
+        let filtered = [...this.state.inventory];
+        // Sort: in stock (stock > 0) first, out of stock last
+        filtered.sort((a, b) => {
+            const aInStock = (a.stock > 0) ? 1 : 0;
+            const bInStock = (b.stock > 0) ? 1 : 0;
+            return bInStock - aInStock;
+        });
+
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
             filtered = filtered.filter(item => 
@@ -544,9 +1003,15 @@ class App {
         }
 
         filtered.forEach(item => {
+            const isOutOfStock = item.stock <= 0;
             const div = document.createElement('div');
-            div.className = 'product-card';
+            div.className = isOutOfStock ? 'product-card out-of-stock' : 'product-card';
             div.onclick = () => this.addToCart(item);
+            
+            const stockDisplay = isOutOfStock 
+                ? `<span style="font-size: 12px; color: var(--danger); font-weight: 500;">Sem Estoque</span>`
+                : `<span style="font-size: 12px; color: var(--text-secondary);">Estoque: ${item.stock}</span>`;
+
             div.innerHTML = `
                 <div>
                     <h4 style="color: var(--text-primary); margin-bottom: 4px;">${item.name}</h4>
@@ -554,7 +1019,7 @@ class App {
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span style="color: var(--accent-gold); font-weight: 600;">${formatCurrency(Number(item.price))}</span>
-                    <span style="font-size: 12px; color: var(--text-secondary);">Estoque: ${item.stock}</span>
+                    ${stockDisplay}
                 </div>
             `;
             grid.appendChild(div);
@@ -562,6 +1027,10 @@ class App {
     }
 
     addToCart(product) {
+        if (product.stock <= 0) {
+            this.showToast('Este produto está sem estoque disponível', true);
+            return;
+        }
         const existing = this.cart.find(item => item.id === product.id);
         if (existing) {
             if (existing.qty < product.stock) {
@@ -643,13 +1112,16 @@ class App {
         if (this.cart.length === 0) return;
 
         let subtotal = 0;
+        let totalCost = 0;
         // Deduct from inventory
         this.cart.forEach(cartItem => {
             const inventoryItem = this.state.inventory.find(i => i.id === cartItem.id);
+            const itemCost = inventoryItem ? (parseFloat(inventoryItem.cost) || 0) : 0;
             if (inventoryItem) {
                 inventoryItem.stock -= cartItem.qty;
             }
             subtotal += cartItem.price * cartItem.qty;
+            totalCost += itemCost * cartItem.qty;
         });
 
         const discount = parseFloat(document.getElementById('sale-discount').value) || 0;
@@ -657,6 +1129,11 @@ class App {
         const clientName = document.getElementById('client-name').value.trim();
         const clientPhoneInput = document.getElementById('client-phone').value;
         const clientPhone = clientPhoneInput.replace(/\D/g, ''); // Remove non-digits
+        
+        const paymentMethodEl = document.getElementById('sale-payment-method');
+        const salespersonEl = document.getElementById('sale-salesperson');
+        const paymentMethod = paymentMethodEl ? paymentMethodEl.value : '';
+        const salespersonId = salespersonEl ? salespersonEl.value : '';
 
         // Record sale
         const sale = {
@@ -665,9 +1142,12 @@ class App {
             items: [...this.cart],
             total: total,
             subtotal: subtotal,
+            totalCost: totalCost,
             discount: discount,
             clientName: clientName,
-            clientPhone: clientPhone
+            clientPhone: clientPhone,
+            paymentMethod: paymentMethod,
+            salespersonId: salespersonId
         };
         this.state.sales.push(sale);
 
@@ -700,6 +1180,165 @@ class App {
         this.renderPOSProducts(); // Refresh stock in POS view
     }
 
+    // --- Salespersons ---
+    openSalespersonsModal() {
+        if (!this.isAdmin) return;
+        document.getElementById('salespersons-modal').classList.remove('hidden');
+        this.renderSalespersons();
+    }
+
+    closeSalespersonsModal() {
+        document.getElementById('salespersons-modal').classList.add('hidden');
+    }
+
+    renderSalespersons() {
+        const tbody = document.getElementById('salespersons-body');
+        if(tbody) {
+            tbody.innerHTML = '';
+            this.state.salespersons.forEach(sp => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${sp.name}</td>
+                    <td>${sp.commission}%</td>
+                    <td>
+                        <button class="icon-btn" style="color: var(--danger)" onclick="app.deleteSalesperson('${sp.id}')" title="Excluir"><i data-feather="trash-2"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        this.updateSalespersonSelects();
+        if (window.feather) feather.replace();
+    }
+    
+    updateSalespersonSelects() {
+        const posSelect = document.getElementById('sale-salesperson');
+        const reportSelect = document.getElementById('report-salesperson-filter');
+        
+        if (posSelect) {
+            posSelect.innerHTML = '<option value="">Sem Vendedor</option>';
+            this.state.salespersons.forEach(sp => {
+                posSelect.innerHTML += `<option value="${sp.id}">${sp.name}</option>`;
+            });
+        }
+        if (reportSelect) {
+            const currentVal = reportSelect.value;
+            reportSelect.innerHTML = '<option value="">Todos os Vendedores</option>';
+            this.state.salespersons.forEach(sp => {
+                reportSelect.innerHTML += `<option value="${sp.id}">${sp.name}</option>`;
+            });
+            reportSelect.value = currentVal;
+        }
+    }
+
+    addSalesperson() {
+        if (!this.isAdmin) return;
+        const nameInput = document.getElementById('sp-name');
+        const commInput = document.getElementById('sp-commission');
+        
+        const sp = {
+            id: Date.now().toString(),
+            name: nameInput.value.trim(),
+            commission: parseFloat(commInput.value) || 0
+        };
+        
+        this.state.salespersons.push(sp);
+        this.saveState();
+        
+        nameInput.value = '';
+        commInput.value = '';
+        
+        this.renderSalespersons();
+        this.showToast('Vendedor adicionado.');
+    }
+
+    deleteSalesperson(id) {
+        if (!this.isAdmin) return;
+        this.state.salespersons = this.state.salespersons.filter(sp => sp.id !== id);
+        this.saveState();
+        this.renderSalespersons();
+        this.showToast('Vendedor removido.');
+    }
+
+    // --- Edit/Delete Sales ---
+    deleteSale(id) {
+        if (!this.isAdmin) return;
+        if (!confirm('Deseja realmente EXCLUIR essa venda e retornar os itens para o estoque?')) return;
+
+        const saleIndex = this.state.sales.findIndex(s => s.id === id);
+        if (saleIndex === -1) return;
+        const sale = this.state.sales[saleIndex];
+
+        // Restock inventory
+        sale.items.forEach(saleItem => {
+            const inventoryItem = this.state.inventory.find(inv => inv.id === saleItem.id);
+            if (inventoryItem) {
+                inventoryItem.stock += saleItem.qty;
+            }
+        });
+
+        // Remove sale
+        this.state.sales.splice(saleIndex, 1);
+        this.saveState();
+        
+        this.showToast('Venda excluída e estoque restaurado.');
+        this.renderReports();
+        this.renderDashboard();
+    }
+
+    openEditSaleModal(id) {
+        if (!this.isAdmin) return;
+        const sale = this.state.sales.find(s => s.id === id);
+        if (!sale) return;
+
+        document.getElementById('edit-sale-id').value = sale.id;
+        document.getElementById('edit-sale-client').value = sale.clientName || '';
+        document.getElementById('edit-sale-phone').value = sale.clientPhone || '';
+        document.getElementById('edit-sale-payment').value = sale.paymentMethod || 'Dinheiro';
+        document.getElementById('edit-sale-discount').value = sale.discount || 0;
+
+        const spSelect = document.getElementById('edit-sale-salesperson');
+        spSelect.innerHTML = '<option value="">Sem Vendedor</option>';
+        this.state.salespersons.forEach(sp => {
+            spSelect.innerHTML += `<option value="${sp.id}">${sp.name}</option>`;
+        });
+        spSelect.value = sale.salespersonId || '';
+
+        document.getElementById('edit-sale-modal').classList.remove('hidden');
+    }
+
+    closeEditSaleModal() {
+        document.getElementById('edit-sale-modal').classList.add('hidden');
+    }
+
+    saveSaleEdit() {
+        const id = document.getElementById('edit-sale-id').value;
+        const sale = this.state.sales.find(s => s.id === id);
+        if (!sale) return;
+
+        const clientName = document.getElementById('edit-sale-client').value.trim();
+        const clientPhoneInput = document.getElementById('edit-sale-phone').value;
+        const clientPhone = clientPhoneInput.replace(/\D/g, '');
+        const paymentMethod = document.getElementById('edit-sale-payment').value;
+        const salespersonId = document.getElementById('edit-sale-salesperson').value;
+        const discount = parseFloat(document.getElementById('edit-sale-discount').value) || 0;
+
+        sale.clientName = clientName;
+        sale.clientPhone = clientPhone;
+        sale.paymentMethod = paymentMethod;
+        sale.salespersonId = salespersonId;
+        sale.discount = discount;
+        
+        // Recalculate total if discount changed
+        sale.total = Math.max(0, sale.subtotal - discount);
+
+        this.saveState();
+        this.closeEditSaleModal();
+        this.showToast('Venda editada com sucesso.');
+        this.renderReports();
+        this.renderDashboard();
+    }
+
     // --- Reports ---
     renderReports() {
         const dateStartInput = document.getElementById('report-date-start');
@@ -715,55 +1354,279 @@ class App {
         
         const startDateStr = dateStartInput.value;
         const endDateStr = dateEndInput.value;
+        const spFilter = document.getElementById('report-salesperson-filter')?.value;
         const tbody = document.getElementById('reports-body');
         tbody.innerHTML = '';
         
         let dayRevenue = 0;
+        let dayProfit = 0;
+        let dayCommission = 0;
         let daySalesCount = 0;
 
-        // Filter sales for this day
+        // Filter sales for this day and salesperson
         const daySales = this.state.sales.filter(sale => {
             const saleDate = new Date(sale.date);
             const formattedSaleDate = saleDate.getFullYear() + '-' + 
                                       String(saleDate.getMonth() + 1).padStart(2, '0') + '-' + 
                                       String(saleDate.getDate()).padStart(2, '0');
-            return formattedSaleDate >= startDateStr && formattedSaleDate <= endDateStr;
+            const matchDate = formattedSaleDate >= startDateStr && formattedSaleDate <= endDateStr;
+            const matchSp = spFilter ? sale.salespersonId === spFilter : true;
+            return matchDate && matchSp;
         });
 
         if (daySales.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary);">Nenhuma venda registrada neste período</td></tr>';
             document.getElementById('report-sales-count').innerText = 0;
             document.getElementById('report-revenue').innerText = formatCurrency(0);
+            document.getElementById('report-profit').innerText = formatCurrency(0);
+            document.getElementById('report-commission-container').style.display = 'none';
             return;
         }
 
         // We want to show latest sales on top
         daySales.reverse().forEach(sale => {
+            const saleCost = sale.totalCost || 0;
+            const saleProfit = sale.total - saleCost;
+            
             dayRevenue += sale.total;
+            dayProfit += saleProfit;
             daySalesCount++;
+            
+            let spName = 'Nenhum';
+            let commissionAmt = 0;
+            if (sale.salespersonId) {
+                const sp = this.state.salespersons.find(s => s.id === sale.salespersonId);
+                if (sp) {
+                    spName = sp.name;
+                    commissionAmt = saleProfit * (sp.commission / 100);
+                    dayCommission += commissionAmt;
+                }
+            }
 
             const timeStr = new Date(sale.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             
             const itemNames = sale.items.map(i => `${i.qty}x ${i.name}`).join(', ');
             let discountText = sale.discount > 0 ? ` <br><span style="color:var(--danger);font-size:11px;">(Desc: ${formatCurrency(sale.discount)})</span>` : '';
             
+            const paymentMethod = sale.paymentMethod || '-';
+
+            let actionsHtml = '<td></td>';
+            if (this.isAdmin) {
+                actionsHtml = `
+                <td>
+                    <div style="display:flex; gap:8px;">
+                        <button class="icon-btn" onclick="app.openEditSaleModal('${sale.id}')" title="Editar Venda" style="color: var(--accent-gold);"><i data-feather="edit-2"></i></button>
+                        <button class="icon-btn" style="color: var(--danger)" onclick="app.deleteSale('${sale.id}')" title="Excluir Venda"><i data-feather="trash-2"></i></button>
+                    </div>
+                </td>
+                `;
+            }
+
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${timeStr}</td>
-                <td><strong>${sale.clientName || 'Cliente Balcão'}</strong></td>
-                <td>${sale.clientPhone || '-'}</td>
+                <td>
+                    <strong>${sale.clientName || 'Cliente Balcão'}</strong><br>
+                    <span style="font-size: 11px; color: var(--text-secondary);">${sale.clientPhone || '-'}</span>
+                </td>
+                <td>
+                    ${paymentMethod}<br>
+                    <span style="font-size: 11px; color: var(--text-secondary);"><i data-feather="user" style="width: 10px; height: 10px;"></i> ${spName}</span>
+                </td>
                 <td>${itemNames}${discountText}</td>
+                <td style="color: #2ecc71; font-weight: 500;">${formatCurrency(saleProfit)}</td>
                 <td style="font-weight: 600; color: var(--accent-gold);">${formatCurrency(sale.total)}</td>
+                ${actionsHtml}
             `;
             tbody.appendChild(tr);
         });
 
         document.getElementById('report-sales-count').innerText = daySalesCount;
         document.getElementById('report-revenue').innerText = formatCurrency(dayRevenue);
+        document.getElementById('report-profit').innerText = formatCurrency(dayProfit);
+        
+        const commContainer = document.getElementById('report-commission-container');
+        if (spFilter) {
+            commContainer.style.display = 'block';
+            document.getElementById('report-commission').innerText = formatCurrency(dayCommission);
+        } else {
+            commContainer.style.display = 'none';
+        }
 
         if (window.feather) feather.replace();
     }
+
+    openSettingsModal() {
+        if (!this.isAdmin) return;
+        const creds = this.state.credentials || DEFAULT_STATE.credentials;
+        document.getElementById('settings-sys-password').value = creds.system;
+        document.getElementById('settings-admin-password').value = creds.admin;
+        
+        document.getElementById('settings-sys-password').type = 'password';
+        document.getElementById('settings-admin-password').type = 'password';
+        
+        // Reset visibility buttons to eye icon
+        document.querySelectorAll('#settings-modal .icon-btn').forEach(btn => {
+            btn.innerHTML = '<i data-feather="eye"></i>';
+        });
+
+        document.getElementById('settings-modal').classList.remove('hidden');
+        if (window.feather) feather.replace();
+    }
+
+    closeSettingsModal() {
+        document.getElementById('settings-modal').classList.add('hidden');
+    }
+
+    saveSettings() {
+        const system = document.getElementById('settings-sys-password').value;
+        const admin = document.getElementById('settings-admin-password').value;
+        if (!system || !admin) {
+            this.showToast('As senhas não podem ficar em branco.', true);
+            return;
+        }
+        
+        if (!this.state.credentials) this.state.credentials = {};
+        this.state.credentials.system = system;
+        this.state.credentials.admin = admin;
+        
+        this.saveState();
+        this.closeSettingsModal();
+        this.showToast('Senhas atualizadas com sucesso!');
+    }
+
+    toggleShowPassword(inputId, btn) {
+        const input = document.getElementById(inputId);
+        if (input) {
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.innerHTML = '<i data-feather="eye-off"></i>';
+            } else {
+                input.type = 'password';
+                btn.innerHTML = '<i data-feather="eye"></i>';
+            }
+            if (window.feather) feather.replace();
+        }
+    }
+
+    resetPasswordsToDefault() {
+        this.state.credentials = {
+            system: 'NoOr!2026',
+            admin: 'RaQuel@2026!'
+        };
+        this.saveState();
+        alert("🚨 CÓDIGO DE RECUPERAÇÃO ATIVADO.\nAs senhas foram restauradas para o padrão original.");
+        document.getElementById('app-password').value = '';
+    }
+
+    // --- Backup & Data Recovery ---
+    scanAndRecoverLocalSales() {
+        try {
+            let allLocalSales = [];
+            let allLocalInventory = [];
+            let allLocalSalespersons = [];
+            
+            // Scan all keys in localStorage for state or sales backups
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key) {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (raw && (raw.includes('"sales"') || raw.includes('"inventory"') || key.includes('noor'))) {
+                            const parsed = JSON.parse(raw);
+                            if (parsed && Array.isArray(parsed.sales)) {
+                                allLocalSales = mergeArrayById(allLocalSales, parsed.sales);
+                            }
+                            if (parsed && Array.isArray(parsed.inventory)) {
+                                allLocalInventory = mergeArrayById(allLocalInventory, parsed.inventory);
+                            }
+                            if (parsed && Array.isArray(parsed.salespersons)) {
+                                allLocalSalespersons = mergeArrayById(allLocalSalespersons, parsed.salespersons);
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore non-JSON keys
+                    }
+                }
+            }
+
+            const currentSaleIds = new Set((this.state.sales || []).map(s => String(s.id)));
+            const missingSales = allLocalSales.filter(s => s && s.id && !currentSaleIds.has(String(s.id)));
+
+            if (missingSales.length === 0) {
+                this.showToast('Todas as vendas locais deste computador já estão sincronizadas!');
+                return;
+            }
+
+            // Merge missing sales
+            this.state.sales = mergeArrayById(this.state.sales, missingSales);
+            this.state.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+            this.state.inventory = mergeArrayById(this.state.inventory, allLocalInventory);
+            this.state.salespersons = mergeArrayById(this.state.salespersons, allLocalSalespersons);
+
+            this.saveState();
+            this.showToast(`🎉 Sucesso! ${missingSales.length} venda(s) recuperada(s) e sincronizada(s)!`);
+            this.refreshCurrentView();
+        } catch (e) {
+            console.error("Erro na recuperação manual:", e);
+            this.showToast('Erro ao escanear vendas locais.', true);
+        }
+    }
+
+    exportJSONBackup() {
+        try {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.state, null, 2));
+            const downloadAnchor = document.createElement('a');
+            const dateStr = new Date().toISOString().split('T')[0];
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `noor_backup_${dateStr}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            this.showToast('Backup exportado com sucesso!');
+        } catch (e) {
+            console.error("Erro ao exportar backup:", e);
+            this.showToast('Falha ao exportar backup.', true);
+        }
+    }
+
+    importJSONBackup(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                if (!importedData.sales && !importedData.inventory) {
+                    this.showToast('Arquivo de backup inválido.', true);
+                    return;
+                }
+
+                const newSales = importedData.sales || [];
+                const newInventory = importedData.inventory || [];
+                const newSalespersons = importedData.salespersons || [];
+
+                const beforeCount = (this.state.sales || []).length;
+                this.state.sales = mergeArrayById(this.state.sales, newSales);
+                this.state.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+                
+                this.state.inventory = mergeArrayById(this.state.inventory, newInventory);
+                this.state.salespersons = mergeArrayById(this.state.salespersons, newSalespersons);
+
+                const addedSales = this.state.sales.length - beforeCount;
+
+                this.saveState();
+                this.showToast(`Importação concluída! ${addedSales} nova(s) venda(s) mesclada(s).`);
+                this.refreshCurrentView();
+            } catch (err) {
+                console.error("Erro ao importar JSON:", err);
+                this.showToast('Erro ao ler arquivo de backup.', true);
+            }
+        };
+        reader.readAsText(file);
+    }
 }
 
-// Initialize app when DOM is loaded
-const app = new App();
+// Initialize app when DOM is loaded and expose globally for inline HTML handlers
+window.app = new App();

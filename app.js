@@ -55,6 +55,8 @@ class App {
         this.barcodeBuffer = '';
         this.lastKeystrokeTime = 0;
         this.state = { ...DEFAULT_STATE }; // Boot dummy state instantly so app works
+        this.activeInventoryTab = 'perfumes';
+        this.activePOSTab = 'perfumes';
         
         // Boot login UI and router shell instantly
         this.checkMainLogin();
@@ -117,26 +119,8 @@ class App {
     }
 
     async loadState() {
-        console.log("Iniciando sincronização em tempo real...");
+        console.log("Iniciando sincronização em tempo real (apenas nuvem)...");
         
-        // 1. Tentar carregar backup local instantaneamente para evitar tela em branco
-        const localBackup = localStorage.getItem('noor_state');
-        let localState = null;
-        if (localBackup) {
-            try {
-                localState = JSON.parse(localBackup);
-                if (localState) {
-                    this.state = localState;
-                    if (!this.state.credentials) this.state.credentials = { ...DEFAULT_STATE.credentials };
-                    this.updateSalespersonSelects();
-                    this.refreshCurrentView();
-                }
-            } catch (e) {
-                console.error("Erro ao ler backup local", e);
-            }
-        }
-
-        // 2. Conectar Listener em Tempo Real (onValue) do Firebase Realtime Database
         const stateRef = ref(db, 'noor_state');
         onValue(stateRef, (snapshot) => {
             if (snapshot.exists()) {
@@ -146,53 +130,28 @@ class App {
                 const cloudSalespersons = cloudVal.salespersons || [];
                 const cloudCredentials = cloudVal.credentials || { ...DEFAULT_STATE.credentials };
 
-                let localSales = localState ? (localState.sales || []) : [];
-                let localInventory = localState ? (localState.inventory || []) : [];
-                let localSalespersons = localState ? (localState.salespersons || []) : [];
-
-                // Verificar se existem vendas locais no navegador que não estão no cloud
-                const cloudSaleIds = new Set(cloudSales.map(s => String(s.id)));
-                const missingLocalSales = localSales.filter(s => s && s.id && !cloudSaleIds.has(String(s.id)));
-
-                // Mesclar vendas, estoque e vendedores por ID sem sobrescrever
-                const mergedSales = mergeArrayById(cloudSales, localSales);
-                mergedSales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-
-                const mergedInventory = mergeArrayById(cloudInventory, localInventory);
-                const mergedSalespersons = mergeArrayById(cloudSalespersons, localSalespersons);
-
                 this.state = {
-                    inventory: mergedInventory,
-                    sales: mergedSales,
-                    salespersons: mergedSalespersons,
+                    inventory: cloudInventory,
+                    sales: cloudSales,
+                    salespersons: cloudSalespersons,
                     credentials: cloudCredentials
                 };
 
-                // Atualizar backup local
-                localStorage.setItem('noor_state', JSON.stringify(this.state));
+                // Ensure sales are properly sorted
+                this.state.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
 
-                // Se havia vendas perdidas no localStorage deste navegador, sincronizar para o Firebase
-                if (missingLocalSales.length > 0) {
-                    console.log(`Recuperadas ${missingLocalSales.length} vendas locais! Enviando para o Firebase...`);
-                    this.showToast(`📢 ${missingLocalSales.length} venda(s) recuperada(s) do navegador local e sincronizada(s)!`);
-                    set(ref(db, 'noor_state'), this.state)
-                        .catch(err => console.error('Erro ao enviar vendas recuperadas:', err));
-                }
-
-                console.log("Dados sincronizados em tempo real. Total de vendas:", this.state.sales.length);
+                console.log("Dados sincronizados em tempo real (Nuvem). Total de vendas:", this.state.sales.length);
             } else {
-                if (localState) {
-                    this.saveState();
-                } else {
-                    this.state = { ...DEFAULT_STATE };
-                    this.saveState();
-                }
+                this.state = { ...DEFAULT_STATE };
+                // Inicializar banco de dados se vazio
+                this.saveState();
             }
 
             this.updateSalespersonSelects();
             this.refreshCurrentView();
         }, (error) => {
             console.error("Erro na conexão em tempo real do Firebase:", error);
+            this.showToast('Erro de conexão com o servidor.', true);
         });
     }
 
@@ -207,33 +166,14 @@ class App {
     saveState() {
         if (!this.state) return;
         
-        // Garante que o backup local está salvo
-        localStorage.setItem('noor_state', JSON.stringify(this.state));
-        
-        // Realiza mesclagem não destrutiva com o estado mais recente do Firebase antes do set
-        get(child(ref(db), 'noor_state')).then((snapshot) => {
-            let stateToSave = this.state;
-            if (snapshot.exists()) {
-                const cloudVal = snapshot.val() || {};
-                stateToSave = {
-                    inventory: mergeArrayById(this.state.inventory, cloudVal.inventory),
-                    sales: mergeArrayById(this.state.sales, cloudVal.sales),
-                    salespersons: mergeArrayById(this.state.salespersons, cloudVal.salespersons),
-                    credentials: this.state.credentials || cloudVal.credentials || DEFAULT_STATE.credentials
-                };
-                stateToSave.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-                this.state = stateToSave;
-                localStorage.setItem('noor_state', JSON.stringify(this.state));
-            }
-            
-            set(ref(db, 'noor_state'), stateToSave)
-                .then(() => console.log('Sincronizado com a nuvem com sucesso'))
-                .catch((error) => console.error('Falha ao salvar na nuvem', error));
-        }).catch(() => {
-            set(ref(db, 'noor_state'), this.state)
-                .then(() => console.log('Sincronizado com a nuvem (direto)'))
-                .catch((error) => console.error('Falha ao salvar na nuvem', error));
-        });
+        // Direct write to Firebase, triggering onValue for all connected clients instantly.
+        // No local memory use.
+        set(ref(db, 'noor_state'), this.state)
+            .then(() => console.log('Estado salvo na nuvem com sucesso'))
+            .catch((error) => {
+                console.error('Falha ao salvar na nuvem', error);
+                this.showToast('Erro ao salvar os dados. Verifique a conexão com a internet.', true);
+            });
     }
 
     init() {
@@ -770,7 +710,11 @@ class App {
         const tbody = document.getElementById('inventory-body');
         tbody.innerHTML = '';
 
-        let filtered = this.state.inventory;
+        let filtered = this.state.inventory.filter(item => {
+            const cat = item.category || 'perfumes';
+            return cat === this.activeInventoryTab;
+        });
+
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
             filtered = filtered.filter(item => 
@@ -885,6 +829,26 @@ class App {
         if (window.feather) feather.replace();
     }
 
+    setInventoryTab(tab) {
+        this.activeInventoryTab = tab;
+        document.getElementById('tab-inv-perfumes').classList.remove('active');
+        document.getElementById('tab-inv-korean').classList.remove('active');
+        document.getElementById(`tab-inv-${tab}`).classList.add('active');
+        
+        const searchInput = document.getElementById('search-inventory');
+        this.renderInventory(searchInput ? searchInput.value : '');
+    }
+
+    setPOSTab(tab) {
+        this.activePOSTab = tab;
+        document.getElementById('tab-pos-perfumes').classList.remove('active');
+        document.getElementById('tab-pos-korean').classList.remove('active');
+        document.getElementById(`tab-pos-${tab}`).classList.add('active');
+        
+        const searchInput = document.getElementById('search-pos');
+        this.renderPOSProducts(searchInput ? searchInput.value : '');
+    }
+
     openAddProductModal() {
         if (!this.isAdmin) {
             this.showToast('Ação bloqueada: Por favor, ative o Modo Administrador no topo.', true);
@@ -892,7 +856,8 @@ class App {
         }
         document.getElementById('product-form').reset();
         document.getElementById('product-id').value = '';
-        document.getElementById('modal-title').innerText = 'Adicionar Perfume';
+        document.getElementById('product-category').value = 'perfumes';
+        document.getElementById('modal-title').innerText = 'Adicionar Produto';
         
         const helper = document.getElementById('google-search-helper');
         if (helper) helper.style.display = 'none';
@@ -906,6 +871,7 @@ class App {
 
     saveProduct() {
         const id = document.getElementById('product-id').value;
+        const category = document.getElementById('product-category').value || 'perfumes';
         const name = document.getElementById('product-name').value;
         const brand = document.getElementById('product-brand').value;
         const cost = parseFloat(document.getElementById('product-cost').value) || 0;
@@ -917,12 +883,12 @@ class App {
             // Update
             const idx = this.state.inventory.findIndex(i => i.id === id);
             if (idx !== -1) {
-                this.state.inventory[idx] = { id, name, brand, cost, price, stock, barcode };
+                this.state.inventory[idx] = { id, category, name, brand, cost, price, stock, barcode };
             }
         } else {
             // Create
             const newId = Date.now().toString();
-            this.state.inventory.push({ id: newId, name, brand, cost, price, stock, barcode });
+            this.state.inventory.push({ id: newId, category, name, brand, cost, price, stock, barcode });
         }
 
         this.saveState();
@@ -940,6 +906,7 @@ class App {
         if (!product) return;
 
         document.getElementById('product-id').value = product.id;
+        document.getElementById('product-category').value = product.category || 'perfumes';
         document.getElementById('product-name').value = product.name;
         document.getElementById('product-brand').value = product.brand;
         document.getElementById('product-cost').value = product.cost || 0;
@@ -950,7 +917,7 @@ class App {
         const helper = document.getElementById('google-search-helper');
         if (helper) helper.style.display = 'none';
         
-        document.getElementById('modal-title').innerText = 'Editar Perfume';
+        document.getElementById('modal-title').innerText = 'Editar Produto';
         document.getElementById('product-modal').classList.remove('hidden');
     }
 
@@ -987,7 +954,10 @@ class App {
         const grid = document.getElementById('pos-products-grid');
         grid.innerHTML = '';
 
-        let filtered = [...this.state.inventory];
+        let filtered = this.state.inventory.filter(item => {
+            const cat = item.category || 'perfumes';
+            return cat === this.activePOSTab;
+        });
         // Sort: in stock (stock > 0) first, out of stock last
         filtered.sort((a, b) => {
             const aInStock = (a.stock > 0) ? 1 : 0;
@@ -1608,56 +1578,7 @@ class App {
 
     // --- Backup & Data Recovery ---
     scanAndRecoverLocalSales() {
-        try {
-            let allLocalSales = [];
-            let allLocalInventory = [];
-            let allLocalSalespersons = [];
-            
-            // Scan all keys in localStorage for state or sales backups
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key) {
-                    try {
-                        const raw = localStorage.getItem(key);
-                        if (raw && (raw.includes('"sales"') || raw.includes('"inventory"') || key.includes('noor'))) {
-                            const parsed = JSON.parse(raw);
-                            if (parsed && Array.isArray(parsed.sales)) {
-                                allLocalSales = mergeArrayById(allLocalSales, parsed.sales);
-                            }
-                            if (parsed && Array.isArray(parsed.inventory)) {
-                                allLocalInventory = mergeArrayById(allLocalInventory, parsed.inventory);
-                            }
-                            if (parsed && Array.isArray(parsed.salespersons)) {
-                                allLocalSalespersons = mergeArrayById(allLocalSalespersons, parsed.salespersons);
-                            }
-                        }
-                    } catch (e) {
-                        // Ignore non-JSON keys
-                    }
-                }
-            }
-
-            const currentSaleIds = new Set((this.state.sales || []).map(s => String(s.id)));
-            const missingSales = allLocalSales.filter(s => s && s.id && !currentSaleIds.has(String(s.id)));
-
-            if (missingSales.length === 0) {
-                this.showToast('Todas as vendas locais deste computador já estão sincronizadas!');
-                return;
-            }
-
-            // Merge missing sales
-            this.state.sales = mergeArrayById(this.state.sales, missingSales);
-            this.state.sales.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-            this.state.inventory = mergeArrayById(this.state.inventory, allLocalInventory);
-            this.state.salespersons = mergeArrayById(this.state.salespersons, allLocalSalespersons);
-
-            this.saveState();
-            this.showToast(`🎉 Sucesso! ${missingSales.length} venda(s) recuperada(s) e sincronizada(s)!`);
-            this.refreshCurrentView();
-        } catch (e) {
-            console.error("Erro na recuperação manual:", e);
-            this.showToast('Erro ao escanear vendas locais.', true);
-        }
+        this.showToast('A recuperação local foi desativada para garantir a sincronização estrita na nuvem em tempo real.', true);
     }
 
     exportJSONBackup() {

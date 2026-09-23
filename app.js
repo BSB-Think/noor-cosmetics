@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-import { getDatabase, ref, get, set, child, onValue } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-database.js";
+import { getDatabase, ref, get, set, child, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-database.js";
 
 // Helper for non-destructive array merging by unique ID
 function mergeArrayById(primaryArray = [], secondaryArray = []) {
@@ -11,7 +11,11 @@ function mergeArrayById(primaryArray = [], secondaryArray = []) {
     });
     (primaryArray || []).forEach(item => {
         if (item && item.id !== undefined && item.id !== null) {
-            map.set(String(item.id), item);
+            // primary overwrites secondary, but we keep _deleted flags if present in either
+            const existing = map.get(String(item.id)) || {};
+            const merged = { ...existing, ...item };
+            if (existing._deleted || item._deleted) merged._deleted = true;
+            map.set(String(item.id), merged);
         }
     });
     return Array.from(map.values());
@@ -712,6 +716,7 @@ class App {
         tbody.innerHTML = '';
 
         let filtered = this.state.inventory.filter(item => {
+            if (item._deleted) return false;
             const cat = item.category || 'perfumes';
             return cat === this.activeInventoryTab;
         });
@@ -929,7 +934,8 @@ class App {
         }
         document.getElementById('confirm-modal').classList.remove('hidden');
         document.getElementById('confirm-yes-btn').onclick = () => {
-            this.state.inventory = this.state.inventory.filter(i => i.id !== id);
+            const item = this.state.inventory.find(i => i.id === id);
+            if (item) item._deleted = true;
             this.saveState();
             const searchInput = document.getElementById('search-inventory');
             this.renderInventory(searchInput ? searchInput.value : '');
@@ -956,6 +962,7 @@ class App {
         grid.innerHTML = '';
 
         let filtered = this.state.inventory.filter(item => {
+            if (item._deleted) return false;
             const cat = item.category || 'perfumes';
             return cat === this.activePOSTab;
         });
@@ -1368,7 +1375,7 @@ class App {
         });
 
         // Remove sale
-        this.state.sales.splice(saleIndex, 1);
+        this.state.sales[saleIndex]._deleted = true;
         this.saveState();
         
         this.showToast('Venda excluída e estoque restaurado.');
@@ -1455,6 +1462,7 @@ class App {
 
         // Filter sales for this day and salesperson
         const daySales = this.state.sales.filter(sale => {
+            if (sale._deleted) return false;
             const saleDate = new Date(sale.date);
             const formattedSaleDate = saleDate.getFullYear() + '-' + 
                                       String(saleDate.getMonth() + 1).padStart(2, '0') + '-' + 

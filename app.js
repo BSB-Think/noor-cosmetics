@@ -57,6 +57,7 @@ class App {
         this.state = { ...DEFAULT_STATE }; // Boot dummy state instantly so app works
         this.activeInventoryTab = 'perfumes';
         this.activePOSTab = 'perfumes';
+        this.currentPayments = [];
         
         // Boot login UI and router shell instantly
         this.checkMainLogin();
@@ -1080,7 +1081,119 @@ class App {
 
     processCheckout() {
         if (this.cart.length === 0) return;
+        this.openCheckoutModal();
+    }
 
+    openCheckoutModal() {
+        this.currentPayments = [];
+        document.getElementById('checkout-observations').value = '';
+        document.getElementById('checkout-method').value = 'Dinheiro';
+        document.getElementById('checkout-installments').value = '1';
+        this.handleCheckoutMethodChange();
+        this.renderPayments();
+        document.getElementById('checkout-modal').classList.remove('hidden');
+    }
+
+    closeCheckoutModal() {
+        document.getElementById('checkout-modal').classList.add('hidden');
+    }
+
+    handleCheckoutMethodChange() {
+        const method = document.getElementById('checkout-method').value;
+        const instGroup = document.getElementById('checkout-installments-group');
+        if (method === 'Cartão de Crédito') {
+            instGroup.style.display = 'block';
+        } else {
+            instGroup.style.display = 'none';
+        }
+    }
+
+    addPayment() {
+        const method = document.getElementById('checkout-method').value;
+        const installments = parseInt(document.getElementById('checkout-installments').value, 10) || 1;
+        const amount = parseFloat(document.getElementById('checkout-amount').value);
+
+        if (!amount || amount <= 0) {
+            this.showToast('Digite um valor válido para o pagamento.', true);
+            return;
+        }
+
+        this.currentPayments.push({
+            id: Date.now().toString(),
+            method,
+            installments: method === 'Cartão de Crédito' ? installments : 1,
+            amount
+        });
+
+        document.getElementById('checkout-amount').value = '';
+        this.renderPayments();
+    }
+
+    removePayment(id) {
+        this.currentPayments = this.currentPayments.filter(p => p.id !== id);
+        this.renderPayments();
+    }
+
+    renderPayments() {
+        let subtotal = 0;
+        this.cart.forEach(cartItem => subtotal += cartItem.price * cartItem.qty);
+        const discount = parseFloat(document.getElementById('sale-discount').value) || 0;
+        const totalDue = Math.max(0, subtotal - discount);
+
+        let sumPayments = 0;
+        const listEl = document.getElementById('checkout-payments-list');
+        listEl.innerHTML = '';
+
+        this.currentPayments.forEach(p => {
+            sumPayments += p.amount;
+            const div = document.createElement('div');
+            div.style = 'display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border-color);';
+            let label = p.method;
+            if (p.method === 'Cartão de Crédito' && p.installments > 1) {
+                label += ` (${p.installments}x)`;
+            }
+            div.innerHTML = `
+                <span style="font-size: 13px; color: var(--text-primary);">${label}</span>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <span style="font-size: 13px; font-weight: 500; color: var(--accent-gold);">${formatCurrency(p.amount)}</span>
+                    <button class="icon-btn" style="color: var(--danger); padding: 0;" onclick="app.removePayment('${p.id}')"><i data-feather="trash-2" style="width: 14px; height: 14px;"></i></button>
+                </div>
+            `;
+            listEl.appendChild(div);
+        });
+
+        if (this.currentPayments.length === 0) {
+            listEl.innerHTML = '<div style="padding: 12px; font-size: 12px; color: var(--text-secondary); text-align: center;">Nenhum pagamento registrado</div>';
+        }
+
+        const remaining = totalDue - sumPayments;
+        
+        document.getElementById('checkout-total').innerText = formatCurrency(totalDue);
+        
+        const remainingEl = document.getElementById('checkout-remaining');
+        if (remaining > 0) {
+            remainingEl.innerText = formatCurrency(remaining);
+            remainingEl.style.color = 'var(--danger)';
+        } else if (remaining < 0) {
+            remainingEl.innerText = `Troco: ${formatCurrency(Math.abs(remaining))}`;
+            remainingEl.style.color = 'var(--text-secondary)';
+        } else {
+            remainingEl.innerText = 'R$ 0,00';
+            remainingEl.style.color = '#10b981'; // success
+        }
+
+        const confirmBtn = document.getElementById('btn-confirm-checkout');
+        // Allow checkout if remaining is <= 0 (allow change for cash)
+        if (sumPayments >= totalDue) {
+            confirmBtn.disabled = false;
+        } else {
+            confirmBtn.disabled = true;
+        }
+        
+        if (window.feather) feather.replace();
+    }
+
+    confirmCheckout() {
         let subtotal = 0;
         let totalCost = 0;
         // Deduct from inventory
@@ -1098,12 +1211,11 @@ class App {
         const total = Math.max(0, subtotal - discount);
         const clientName = document.getElementById('client-name').value.trim();
         const clientPhoneInput = document.getElementById('client-phone').value;
-        const clientPhone = clientPhoneInput.replace(/\D/g, ''); // Remove non-digits
+        const clientPhone = clientPhoneInput.replace(/\D/g, '');
         
-        const paymentMethodEl = document.getElementById('sale-payment-method');
         const salespersonEl = document.getElementById('sale-salesperson');
-        const paymentMethod = paymentMethodEl ? paymentMethodEl.value : '';
         const salespersonId = salespersonEl ? salespersonEl.value : '';
+        const observations = document.getElementById('checkout-observations').value.trim();
 
         // Record sale
         const sale = {
@@ -1116,8 +1228,9 @@ class App {
             discount: discount,
             clientName: clientName,
             clientPhone: clientPhone,
-            paymentMethod: paymentMethod,
-            salespersonId: salespersonId
+            salespersonId: salespersonId,
+            payments: [...this.currentPayments],
+            observations: observations
         };
         this.state.sales.push(sale);
 
@@ -1125,11 +1238,13 @@ class App {
         this.saveState();
         const cartItemsCopy = [...this.cart];
         this.cart = [];
+        this.currentPayments = [];
         
         document.getElementById('client-name').value = '';
         document.getElementById('client-phone').value = '';
         document.getElementById('sale-discount').value = '';
         
+        this.closeCheckoutModal();
         this.showToast('Venda finalizada com sucesso!');
         
         // Generate WhatsApp message
@@ -1139,15 +1254,20 @@ class App {
             if (discount > 0) {
                 msg += `\nDesconto: ${formatCurrency(discount)}`;
             }
-            msg += `\n*Total: ${formatCurrency(total)}*\n\nAgradecemos a preferência e esperamos vê-la(o) em breve! ✨`;
+            msg += `\n*Total Pago: ${formatCurrency(total)}*`;
             
-            // Add country code if not present (assuming Brazil 55)
+            if (observations) {
+                msg += `\n\nObservações:\n${observations}`;
+            }
+
+            msg += `\n\nAgradecemos a preferência e esperamos vê-la(o) em breve! ✨`;
+            
             const finalPhone = clientPhone.startsWith('55') ? clientPhone : '55' + clientPhone;
             window.open('https://wa.me/' + finalPhone + '?text=' + encodeURIComponent(msg), '_blank');
         }
 
         this.renderCart();
-        this.renderPOSProducts(); // Refresh stock in POS view
+        this.renderPOSProducts();
     }
 
     // --- Salespersons ---
@@ -1386,7 +1506,19 @@ class App {
             let discountText = sale.discount > 0 ? ` <br><span style="color:var(--danger);font-size:11px;">(Desc: ${formatCurrency(sale.discount)})</span>` : '';
             let devBadge = isDev ? ` <br><span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(230, 126, 34, 0.2); color:#e67e22; font-weight:600;">DEVOLVIDA (Crédito: ${formatCurrency(sale.creditAmount || sale.total)})</span>` : '';
 
-            const paymentMethod = sale.paymentMethod || '-';
+            let paymentMethod = '-';
+            if (sale.payments && sale.payments.length > 0) {
+                paymentMethod = sale.payments.map(p => {
+                    if (p.method === 'Cartão de Crédito' && p.installments > 1) {
+                        return `${p.method} (${p.installments}x): ${formatCurrency(p.amount)}`;
+                    }
+                    return `${p.method}: ${formatCurrency(p.amount)}`;
+                }).join('<br>');
+            } else if (sale.paymentMethod) {
+                paymentMethod = sale.paymentMethod;
+            }
+
+            let obsHtml = sale.observations ? `<br><span style="font-size: 11px; color: var(--text-secondary);"><i data-feather="message-square" style="width: 10px; height: 10px; margin-right: 4px;"></i>${sale.observations}</span>` : '';
 
             let actionsHtml = '<td></td>';
             if (this.isAdmin) {
@@ -1427,7 +1559,7 @@ class App {
                     ${paymentMethod}<br>
                     <span style="font-size: 11px; color: var(--text-secondary);"><i data-feather="user" style="width: 10px; height: 10px;"></i> ${spName}</span>
                 </td>
-                <td>${itemNames}${discountText}${devBadge}</td>
+                <td>${itemNames}${discountText}${devBadge}${obsHtml}</td>
                 <td style="color: ${isDev ? 'var(--text-secondary)' : '#2ecc71'}; font-weight: 500;">${isDev ? 'R$ 0,00' : formatCurrency(saleProfit)}</td>
                 <td style="font-weight: 600; color: ${isDev ? 'var(--text-secondary)' : 'var(--accent-gold)'};">${isDev ? formatCurrency(0) : formatCurrency(sale.total)}</td>
                 ${actionsHtml}

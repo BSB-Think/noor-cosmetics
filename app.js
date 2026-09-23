@@ -62,6 +62,7 @@ class App {
         this.activeInventoryTab = 'perfumes';
         this.activePOSTab = 'perfumes';
         this.currentPayments = [];
+        this.isOnline = true;
         
         // Boot login UI and router shell instantly
         this.checkMainLogin();
@@ -126,6 +127,21 @@ class App {
     async loadState() {
         console.log("Iniciando sincronização em tempo real (apenas nuvem)...");
         
+        const connectedRef = ref(db, ".info/connected");
+        onValue(connectedRef, (snap) => {
+            this.isOnline = snap.val() === true;
+            const blocker = document.getElementById('offline-blocker');
+            if (blocker) {
+                if (this.isOnline) {
+                    blocker.style.display = 'none';
+                    if (window.feather) feather.replace();
+                } else {
+                    blocker.style.display = 'flex';
+                    if (window.feather) feather.replace();
+                }
+            }
+        });
+        
         const stateRef = ref(db, 'noor_state');
         onValue(stateRef, (snapshot) => {
             if (snapshot.exists()) {
@@ -170,6 +186,10 @@ class App {
 
     saveState() {
         if (!this.state) return;
+        if (!this.isOnline) {
+            this.showToast("Sistema bloqueado. Você está offline.", true);
+            return;
+        }
         
         // Direct write to Firebase, triggering onValue for all connected clients instantly.
         // No local memory use.

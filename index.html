@@ -278,6 +278,14 @@
         <span id="toast-msg" style="font-weight: 500;">Mensagem</span>
     </div>
 
+    
+    <!-- Offline Blocker -->
+    <div id="offline-blocker" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 10, 12, 0.95); z-index: 999999; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; backdrop-filter: blur(5px);">
+        <i data-feather="wifi-off" style="width: 64px; height: 64px; color: var(--danger); margin-bottom: 24px;"></i>
+        <h2 style="font-family: var(--font-heading); color: var(--text-primary); margin-bottom: 12px;">Sem Conexão com a Internet</h2>
+        <p style="color: var(--text-secondary); max-width: 400px; line-height: 1.6;">O sistema Noor Cosméticos opera 100% na nuvem para garantir que os dados de todas as lojas estejam sincronizados. O uso foi bloqueado até que a conexão seja restabelecida para evitar perda de dados.</p>
+    </div>
+
     <!-- Modals -->
     <div class="modal-overlay hidden" id="checkout-modal">
         <div class="modal" style="max-width: 600px;">
@@ -443,6 +451,14 @@
                 </form>
             </div>
         </div>
+    </div>
+
+    
+    <!-- Offline Blocker -->
+    <div id="offline-blocker" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 10, 12, 0.95); z-index: 999999; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; backdrop-filter: blur(5px);">
+        <i data-feather="wifi-off" style="width: 64px; height: 64px; color: var(--danger); margin-bottom: 24px;"></i>
+        <h2 style="font-family: var(--font-heading); color: var(--text-primary); margin-bottom: 12px;">Sem Conexão com a Internet</h2>
+        <p style="color: var(--text-secondary); max-width: 400px; line-height: 1.6;">O sistema Noor Cosméticos opera 100% na nuvem para garantir que os dados de todas as lojas estejam sincronizados. O uso foi bloqueado até que a conexão seja restabelecida para evitar perda de dados.</p>
     </div>
 
     <!-- Modals -->
